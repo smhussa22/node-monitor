@@ -1,0 +1,1 @@
+NodeMonitor is a network monitoring system with automated incident response, heavily inspired by Splunk.
