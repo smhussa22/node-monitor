@@ -1,2 +1,4 @@
 summary.md
 CLAUDE.md
+*.pyc
+__pycache__/
