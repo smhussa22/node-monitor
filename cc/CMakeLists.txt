@@ -4,18 +4,29 @@ project(node_monitor CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+include(FetchContent)
+
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
 
 include_directories(include)
 
 set(LIB_SOURCES
-    src/collector_server.cc
-    src/metric_cache.cc
-    src/scheduler.cc
-    src/socket_fd.cc
-    src/thread_pool.cc
+    src/CollectorServer.cc
+    src/MetricCache.cc
+    src/Scheduler.cc
+    src/SocketFd.cc
+    src/ThreadPool.cc
 )
 
 add_library(node_monitor_lib STATIC ${LIB_SOURCES})
+target_link_libraries(node_monitor_lib PUBLIC nlohmann_json::nlohmann_json)
 
 add_executable(node_monitor src/main.cc)
 target_link_libraries(node_monitor PRIVATE node_monitor_lib)

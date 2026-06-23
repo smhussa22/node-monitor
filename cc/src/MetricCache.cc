@@ -12,44 +12,48 @@
 namespace NodeMonitor
 {
 
-    MetricCache::MetricCache()
-    {
-
-    }
-
-    MetricCache::~MetricCache()
-    {
-
-    }
-
     void MetricCache::update(const Metric& metric)
     {
+
+        std::lock_guard<std::mutex> lock { m_mutex };
+        m_metrics[metric.m_hostname] = metric;
 
     }
 
     std::optional<Metric> MetricCache::get(const std::string& hostname) const
     {
 
-        return std::nullopt;
+        std::lock_guard<std::mutex> lock { m_mutex };
+        auto iter { m_metrics.find(hostname) };
+        if (iter == m_metrics.end()) return std::nullopt;
+        return iter->second;
 
     }
 
     std::vector<Metric> MetricCache::get_all() const
     {
 
-        return { };
+        std::lock_guard<std::mutex> lock { m_mutex };
+        std::vector<Metric> snapshot { };
+        snapshot.reserve(m_metrics.size());
+        for (const auto& [hostname, metric] : m_metrics) snapshot.push_back(metric);
+        return snapshot;
 
     }
 
     std::size_t MetricCache::size() const
     {
 
-        return std::size_t { 0 };
+        std::lock_guard<std::mutex> lock { m_mutex };
+        return m_metrics.size();
 
     }
 
     void MetricCache::clear()
     {
+
+        std::lock_guard<std::mutex> lock { m_mutex };
+        m_metrics.clear();
 
     }
 

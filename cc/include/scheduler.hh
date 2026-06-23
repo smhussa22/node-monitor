@@ -28,11 +28,14 @@ namespace NodeMonitor
 
     public:
 
-        Scheduler();
+        Scheduler() = default;
         ~Scheduler();
 
         Scheduler(const Scheduler&) = delete;
         Scheduler& operator=(const Scheduler&) = delete;
+
+        Scheduler(Scheduler&&) = delete;
+        Scheduler& operator=(Scheduler&&) = delete;
 
         // begin running scheduled tasks on a background thread
         void start();

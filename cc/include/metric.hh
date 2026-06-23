@@ -10,6 +10,7 @@
 #include <string>
 
 // 3rd party headers
+#include <nlohmann/json.hpp>
 
 // project headers
 
@@ -23,7 +24,7 @@ namespace NodeMonitor
         std::string m_hostname { }; // identifier of the device that emitted the sample
         std::string m_vendor { }; // vendor of the device (cisco, juniper, paloalto, etc.)
         std::chrono::system_clock::time_point m_timestamp { }; // wall clock time when the sample was received
-        std::string m_payload { }; // raw json payload as received from the device
+        ::nlohmann::json m_payload { }; // parsed json payload from the device; includes all vendor-specific fields
         double m_cpu { 0.0 }; // cpu usage percentage parsed from the payload
         double m_memory { 0.0 }; // memory usage percentage parsed from the payload
 

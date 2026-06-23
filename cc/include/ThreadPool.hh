@@ -28,11 +28,15 @@ namespace NodeMonitor
 
     public:
 
+        ThreadPool() = delete;
         explicit ThreadPool(std::size_t thread_count);
         ~ThreadPool();
 
         ThreadPool(const ThreadPool&) = delete;
         ThreadPool& operator=(const ThreadPool&) = delete;
+
+        ThreadPool(ThreadPool&&) = delete;
+        ThreadPool& operator=(ThreadPool&&) = delete;
 
         // submit a task to be executed by one of the worker threads
         void enqueue(std::function<void()> task);

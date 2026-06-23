@@ -2,6 +2,7 @@
 #include "SocketFd.hh"
 
 // c sys headers
+#include <unistd.h>
 
 // cpp stdlib headers
 
@@ -13,6 +14,7 @@ namespace NodeMonitor
 {
 
     SocketFd::SocketFd(int fd)
+        : m_fd { fd }
     {
 
     }
@@ -20,9 +22,12 @@ namespace NodeMonitor
     SocketFd::~SocketFd()
     {
 
+        if (m_fd != -1) ::close(m_fd);
+
     }
 
     SocketFd::SocketFd(SocketFd&& other) noexcept
+        : m_fd { other.release() }
     {
 
     }
@@ -30,6 +35,7 @@ namespace NodeMonitor
     SocketFd& SocketFd::operator=(SocketFd&& other) noexcept
     {
 
+        if (this != &other) reset(other.release());
         return *this;
 
     }
@@ -37,26 +43,31 @@ namespace NodeMonitor
     int SocketFd::get() const noexcept
     {
 
-        return -1;
+        return m_fd;
 
     }
 
     int SocketFd::release() noexcept
     {
 
-        return -1;
+        int fd { m_fd };
+        m_fd = -1;
+        return fd;
 
     }
 
     void SocketFd::reset(int fd) noexcept
     {
 
+        if (m_fd != -1) ::close(m_fd);
+        m_fd = fd;
+
     }
 
     bool SocketFd::is_valid() const noexcept
     {
 
-        return false;
+        return m_fd != -1;
 
     }
 

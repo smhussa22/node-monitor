@@ -27,8 +27,8 @@ namespace NodeMonitor
 
     public:
 
-        MetricCache();
-        ~MetricCache();
+        MetricCache() = default;
+        ~MetricCache() = default;
 
         MetricCache(const MetricCache&) = delete;
         MetricCache& operator=(const MetricCache&) = delete;

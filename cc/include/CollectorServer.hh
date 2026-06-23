@@ -28,11 +28,15 @@ namespace NodeMonitor
 
     public:
 
+        CollectorServer() = delete;
         CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<ThreadPool> pool, std::uint16_t port);
         ~CollectorServer();
 
         CollectorServer(const CollectorServer&) = delete;
         CollectorServer& operator=(const CollectorServer&) = delete;
+
+        CollectorServer(CollectorServer&&) = delete;
+        CollectorServer& operator=(CollectorServer&&) = delete;
 
         // begin listening for connections on the configured port
         void start();
