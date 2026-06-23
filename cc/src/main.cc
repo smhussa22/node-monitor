@@ -25,7 +25,7 @@ int main()
 
     // construct the shared cache and worker pool used by the collector
     auto cache { std::make_shared<nm::MetricCache>() };
-    auto pool { std::make_shared<nm::ThreadPool>(std::size_t { 4 }) };
+    auto pool { std::make_shared<nm::ThreadPool>(4uz) };
 
     // construct the collector server bound to a default port
     nm::CollectorServer server { cache, pool, std::uint16_t { 8000 } };

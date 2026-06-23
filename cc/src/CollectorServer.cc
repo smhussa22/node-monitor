@@ -122,20 +122,50 @@ namespace NodeMonitor
 
             m_pool->enqueue([this, client_fd]
             {
+
+                // accumulate reads until we have the full http request (headers + content-length body)
                 std::string request { };
-                char buffer[4096] { };
-                ::ssize_t bytes { ::read(client_fd, buffer, sizeof(buffer) - 1) };
-                if (bytes > 0)
+                char chunk[4096] { };
+                std::size_t body_start { std::string::npos };
+                std::size_t content_length { 0 };
+                while (true)
                 {
-                    buffer[bytes] = '\0';
-                    request = std::string { buffer };
-                    handle_request(request);
+                    ::ssize_t n { ::read(client_fd, chunk, sizeof(chunk)) };
+                    if (n <= 0) break;
+                    request.append(chunk, static_cast<std::size_t>(n));
+
+                    // once we see the end-of-headers marker, parse content-length from the headers
+                    if (body_start == std::string::npos)
+                    {
+                        auto idx { request.find("\r\n\r\n") };
+                        if (idx != std::string::npos)
+                        {
+                            body_start = idx + 4;
+                            std::string headers { request.substr(0, idx) };
+                            auto cl_pos { headers.find("Content-Length:") };
+                            if (cl_pos == std::string::npos) cl_pos = headers.find("content-length:");
+                            if (cl_pos != std::string::npos)
+                            {
+                                auto val_start { cl_pos + std::string { "Content-Length:" }.size() };
+                                while (val_start < headers.size() && headers[val_start] == ' ') ++val_start;
+                                auto val_end { headers.find("\r\n", val_start) };
+                                if (val_end == std::string::npos) val_end = headers.size();
+                                content_length = std::stoul(headers.substr(val_start, val_end - val_start));
+                            }
+                        }
+                    }
+
+                    // exit once we've buffered the full body
+                    if (body_start != std::string::npos && request.size() >= body_start + content_length) break;
                 }
+
+                if (!request.empty()) handle_request(request);
 
                 // send a minimal http 200 response so requests.post() returns cleanly on the python side
                 const char* response { "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" };
                 ::write(client_fd, response, ::strlen(response));
                 ::close(client_fd);
+
             });
 
         }
@@ -149,11 +179,15 @@ namespace NodeMonitor
         auto header_end { raw_request.find("\r\n\r\n") };
         if (header_end == std::string::npos) return;
         std::string body { raw_request.substr(header_end + 4) };
+        if (body.empty()) return;
 
         // parse the json body and build a Metric snapshot for the cache
         try
         {
-            auto parsed { ::nlohmann::json::parse(body) };
+            // declare-then-assign avoids nlohmann's initializer_list ctor wrapping a single value in an array
+            ::nlohmann::json parsed { };
+            parsed = ::nlohmann::json::parse(body);
+            if (!parsed.is_object()) return;
             Metric metric { };
             metric.m_hostname = parsed.value("hostname", std::string { });
             metric.m_vendor = parsed.value("vendor", std::string { });
