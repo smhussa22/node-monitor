@@ -13,10 +13,10 @@
 // 3rd party headers
 
 // project headers
-#include "collector_server.hh"
-#include "metric_cache.hh"
-#include "scheduler.hh"
-#include "thread_pool.hh"
+#include "CollectorServer.hh"
+#include "MetricCache.hh"
+#include "Scheduler.hh"
+#include "ThreadPool.hh"
 
 namespace nm = NodeMonitor;
 

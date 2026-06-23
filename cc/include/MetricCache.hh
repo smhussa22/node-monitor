@@ -2,7 +2,7 @@
 #define NODE_MONITOR_METRIC_CACHE_HH
 
 // related headers
-#include "metric.hh"
+#include "Metric.hh"
 
 // c sys headers
 
@@ -33,6 +33,9 @@ namespace NodeMonitor
         MetricCache(const MetricCache&) = delete;
         MetricCache& operator=(const MetricCache&) = delete;
 
+        MetricCache(MetricCache&&) = delete;
+        MetricCache& operator=(MetricCache&&) = delete;
+        
         // insert or replace the metric record for the metric's hostname
         void update(const Metric& metric);
 

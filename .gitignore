@@ -2,3 +2,4 @@ summary.md
 CLAUDE.md
 *.pyc
 __pycache__/
+.vscode/

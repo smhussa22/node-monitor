@@ -1,5 +1,5 @@
 // related headers
-#include "thread_pool.hh"
+#include "ThreadPool.hh"
 
 // c sys headers
 

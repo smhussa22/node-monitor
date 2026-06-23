@@ -2,9 +2,9 @@
 #define NODE_MONITOR_COLLECTOR_SERVER_HH
 
 // related headers
-#include "metric_cache.hh"
-#include "socket_fd.hh"
-#include "thread_pool.hh"
+#include "MetricCache.hh"
+#include "SocketFd.hh"
+#include "ThreadPool.hh"
 
 // c sys headers
 

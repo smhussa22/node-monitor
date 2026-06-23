@@ -1,5 +1,5 @@
 // related headers
-#include "scheduler.hh"
+#include "Scheduler.hh"
 
 // c sys headers
 
