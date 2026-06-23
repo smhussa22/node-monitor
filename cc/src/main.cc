@@ -33,6 +33,16 @@ int main()
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };
 
+    // schedule a periodic snapshot of the cache and print one line per device
+    scheduler.schedule([cache]
+    {
+        auto metrics { cache->get_all() };
+        if (metrics.empty()) return;
+        std::println("--- {} devices ---", metrics.size());
+        for (const auto& m : metrics)
+            std::println("[{}] {} cpu {:.1f} memory {:.1f}", m.m_vendor, m.m_hostname, m.m_cpu, m.m_memory);
+    }, std::chrono::milliseconds { 5000 });
+
     // start the collector and scheduler, then idle until shutdown is requested
     server.start();
     scheduler.start();
