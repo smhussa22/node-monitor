@@ -20,6 +20,7 @@ include_directories(include)
 set(LIB_SOURCES
     src/CollectorServer.cc
     src/MetricCache.cc
+    src/NetflowReceiver.cc
     src/Scheduler.cc
     src/SocketFd.cc
     src/ThreadPool.cc

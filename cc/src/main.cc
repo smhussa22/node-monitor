@@ -15,6 +15,7 @@
 // project headers
 #include "CollectorServer.hh"
 #include "MetricCache.hh"
+#include "NetflowReceiver.hh"
 #include "Scheduler.hh"
 #include "ThreadPool.hh"
 
@@ -29,6 +30,9 @@ int main()
 
     // construct the collector server bound to a default port
     nm::CollectorServer server { cache, pool, std::uint16_t { 8000 } };
+
+    // construct the netflow receiver bound to the standard netflow v5/v9 port
+    nm::NetflowReceiver netflow { std::uint16_t { 2055 } };
 
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };
@@ -46,11 +50,13 @@ int main()
     // start the collector and scheduler, then idle until shutdown is requested
     server.start();
     scheduler.start();
+    netflow.start();
     std::println("node-monitor collector running on port 8000");
     std::this_thread::sleep_for(std::chrono::hours { 1 });
 
     // graceful shutdown in reverse start order
     scheduler.stop();
+    netflow.stop();
     server.stop();
     pool->shutdown();
 
