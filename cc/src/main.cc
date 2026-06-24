@@ -9,8 +9,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <exception>
+#include <format>
 #include <memory>
 #include <print>
+#include <string>
 #include <thread>
 
 // 3rd party headers
@@ -18,6 +22,7 @@
 // project headers
 #include "CollectorServer.hh"
 #include "MetricCache.hh"
+#include "MetricStore.hh"
 #include "NetflowReceiver.hh"
 #include "Scheduler.hh"
 #include "ThreadPool.hh"
@@ -35,8 +40,28 @@ int main()
     auto cache { std::make_shared<nm::MetricCache>() };
     auto pool { std::make_shared<nm::ThreadPool>(4uz) };
 
+    // construct the optional persistent store; only created when POSTGRES_HOST is set in the environment
+    std::shared_ptr<nm::MetricStore> store { };
+    if (const char* pg_host { std::getenv("POSTGRES_HOST") }; pg_host != nullptr)
+    {
+        const char* pg_port { std::getenv("POSTGRES_PORT") };
+        const char* pg_user { std::getenv("POSTGRES_USER") };
+        const char* pg_pass { std::getenv("POSTGRES_PASSWORD") };
+        const char* pg_db { std::getenv("POSTGRES_DB") };
+        std::string dsn { std::format("postgresql://{}:{}@{}:{}/{}", pg_user != nullptr ? pg_user : "postgres", pg_pass != nullptr ? pg_pass : "", pg_host, pg_port != nullptr ? pg_port : "5432", pg_db != nullptr ? pg_db : "postgres") };
+        try
+        {
+            store = std::make_shared<nm::MetricStore>(dsn, 4uz);
+        }
+        catch (const std::exception& e)
+        {
+            std::println("warning: metric store init failed, running without persistence: {}", e.what());
+            store.reset();
+        }
+    }
+
     // construct the collector server bound to a default port
-    nm::CollectorServer server { cache, pool, std::uint16_t { 8000 } };
+    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 } };
 
     // construct the netflow receiver bound to the standard netflow v5/v9 port
     nm::NetflowReceiver netflow { std::uint16_t { 2055 } };

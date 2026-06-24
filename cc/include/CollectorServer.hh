@@ -3,6 +3,7 @@
 
 // related headers
 #include "MetricCache.hh"
+#include "MetricStore.hh"
 #include "SocketFd.hh"
 #include "ThreadPool.hh"
 
@@ -29,7 +30,7 @@ namespace NodeMonitor
     public:
 
         CollectorServer() = delete;
-        CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<ThreadPool> pool, std::uint16_t port);
+        CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port);
         ~CollectorServer();
 
         CollectorServer(const CollectorServer&) = delete;
@@ -59,6 +60,7 @@ namespace NodeMonitor
         void handle_request(const std::string& raw_request);
 
         std::shared_ptr<MetricCache> m_cache { }; // shared cache for storing incoming metrics
+        std::shared_ptr<MetricStore> m_store { }; // optional postgres-backed persistent store; null when disabled
         std::shared_ptr<ThreadPool> m_pool { }; // worker pool used to process requests off the accept thread
         std::uint16_t m_port { 0 }; // tcp port the server listens on
         SocketFd m_listen_socket { }; // raii owned listening socket file descriptor

@@ -21,8 +21,8 @@
 namespace NodeMonitor
 {
 
-    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<ThreadPool> pool, std::uint16_t port)
-        : m_cache { cache }, m_pool { pool }, m_port { port }
+    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port)
+        : m_cache { cache }, m_store { store }, m_pool { pool }, m_port { port }
     {
 
     }
@@ -196,6 +196,7 @@ namespace NodeMonitor
             metric.m_timestamp = std::chrono::system_clock::now();
             metric.m_payload = parsed;
             m_cache->update(metric);
+            if (m_store) m_store->persist(metric);
         }
         catch (const ::nlohmann::json::exception& e)
         {
