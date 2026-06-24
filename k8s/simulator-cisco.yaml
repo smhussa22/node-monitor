@@ -1,0 +1,46 @@
+# 10 pods x 100 simulated routers each = 1000 cisco devices, each also emitting netflow over udp
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator-cisco
+  labels:
+    app: simulator
+    vendor: cisco
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: simulator
+      vendor: cisco
+  template:
+    metadata:
+      labels:
+        app: simulator
+        vendor: cisco
+    spec:
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: simulator
+          image: node-monitor-simulator:latest
+          imagePullPolicy: IfNotPresent
+          # downward api injects the pod name so each pod's simulated hostnames are unique across the fleet
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          args:
+            - "--vendor=cisco"
+            - "--count=100"
+            - "--interval=30"
+            - "--duration=0"
+            - "--collector=http://collector:8000"
+            - "--netflow-host=collector"
+            - "--netflow-port=2055"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"

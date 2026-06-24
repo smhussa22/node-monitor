@@ -1,0 +1,43 @@
+# 2 pods x 50 simulated firewalls each = 100 palo alto devices
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator-paloalto
+  labels:
+    app: simulator
+    vendor: paloalto
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: simulator
+      vendor: paloalto
+  template:
+    metadata:
+      labels:
+        app: simulator
+        vendor: paloalto
+    spec:
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: simulator
+          image: node-monitor-simulator:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          args:
+            - "--vendor=paloalto"
+            - "--count=50"
+            - "--interval=30"
+            - "--duration=0"
+            - "--collector=http://collector:8000"
+          resources:
+            requests:
+              cpu: "75m"
+              memory: "112Mi"
+            limits:
+              cpu: "400m"
+              memory: "224Mi"

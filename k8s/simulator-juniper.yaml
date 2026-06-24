@@ -1,0 +1,43 @@
+# 5 pods x 20 simulated firewalls each = 100 juniper srx devices
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator-juniper
+  labels:
+    app: simulator
+    vendor: juniper
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: simulator
+      vendor: juniper
+  template:
+    metadata:
+      labels:
+        app: simulator
+        vendor: juniper
+    spec:
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: simulator
+          image: node-monitor-simulator:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          args:
+            - "--vendor=juniper"
+            - "--count=20"
+            - "--interval=30"
+            - "--duration=0"
+            - "--collector=http://collector:8000"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "300m"
+              memory: "192Mi"

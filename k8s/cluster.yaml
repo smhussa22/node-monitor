@@ -1,0 +1,33 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: node-monitor
+  region: us-east-1
+  version: "1.30"
+
+# managed node group sized for ~1200 simulator pods + collector + postgres + system pods
+# t3.large gives 2 vCPU / 8 GiB; 2 nodes is the steady-state floor, autoscaler can grow to 6 under load
+managedNodeGroups:
+  - name: workers
+    instanceType: t3.large
+    minSize: 2
+    desiredCapacity: 3
+    maxSize: 6
+    volumeSize: 50
+    volumeType: gp3
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        ebs: true
+        cloudWatch: true
+
+# EBS CSI driver is required for the postgres StatefulSet's PVC to provision real EBS volumes
+addons:
+  - name: aws-ebs-csi-driver
+  - name: coredns
+  - name: kube-proxy
+  - name: vpc-cni
+
+iam:
+  withOIDC: true
