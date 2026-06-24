@@ -27,10 +27,12 @@ FetchContent_MakeAvailable(libpqxx)
 include_directories(include)
 
 set(LIB_SOURCES
+    src/AlertEngine.cc
     src/CollectorServer.cc
     src/MetricCache.cc
     src/MetricStore.cc
     src/NetflowReceiver.cc
+    src/Rule.cc
     src/Scheduler.cc
     src/SocketFd.cc
     src/ThreadPool.cc

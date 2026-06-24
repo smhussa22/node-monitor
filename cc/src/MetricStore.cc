@@ -115,6 +115,60 @@ namespace NodeMonitor
 
     }
 
+    void MetricStore::record_incident(const std::string& rule_name, const std::string& hostname, const std::string& severity, std::chrono::system_clock::time_point fired_at, const ::nlohmann::json& details)
+    {
+
+        auto conn { acquire_connection() };
+        try
+        {
+            ::pqxx::work tx { *conn };
+            tx.exec(
+                "INSERT INTO incidents (rule_name, hostname, severity, fired_at, details) "
+                "VALUES ($1, $2, $3, to_timestamp($4), $5::jsonb)",
+                ::pqxx::params {
+                    rule_name,
+                    hostname,
+                    severity,
+                    std::chrono::duration<double>(fired_at.time_since_epoch()).count(),
+                    details.dump()
+                }
+            );
+            tx.commit();
+        }
+        catch (const std::exception& e)
+        {
+            std::println("error: incident insert failed: {}", e.what());
+        }
+        release_connection(std::move(conn));
+
+    }
+
+    void MetricStore::resolve_incident(const std::string& rule_name, const std::string& hostname, std::chrono::system_clock::time_point resolved_at)
+    {
+
+        auto conn { acquire_connection() };
+        try
+        {
+            ::pqxx::work tx { *conn };
+            tx.exec(
+                "UPDATE incidents SET resolved_at = to_timestamp($3) "
+                "WHERE rule_name = $1 AND hostname = $2 AND resolved_at IS NULL",
+                ::pqxx::params {
+                    rule_name,
+                    hostname,
+                    std::chrono::duration<double>(resolved_at.time_since_epoch()).count()
+                }
+            );
+            tx.commit();
+        }
+        catch (const std::exception& e)
+        {
+            std::println("error: incident resolve failed: {}", e.what());
+        }
+        release_connection(std::move(conn));
+
+    }
+
     void MetricStore::ensure_schema()
     {
 
@@ -135,6 +189,19 @@ namespace NodeMonitor
             );
             tx.exec("CREATE INDEX IF NOT EXISTS idx_metrics_host_ts ON metrics (hostname, ts DESC)");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics (ts DESC)");
+            tx.exec(
+                "CREATE TABLE IF NOT EXISTS incidents ("
+                "    id          BIGSERIAL   PRIMARY KEY,"
+                "    rule_name   TEXT        NOT NULL,"
+                "    hostname    TEXT        NOT NULL,"
+                "    severity    TEXT        NOT NULL,"
+                "    fired_at    TIMESTAMPTZ NOT NULL,"
+                "    resolved_at TIMESTAMPTZ,"
+                "    details     JSONB       NOT NULL"
+                ")"
+            );
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_incidents_active ON incidents (rule_name, hostname) WHERE resolved_at IS NULL");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_incidents_fired ON incidents (fired_at DESC)");
             tx.commit();
         }
         catch (const std::exception& e)

@@ -20,10 +20,12 @@
 // 3rd party headers
 
 // project headers
+#include "AlertEngine.hh"
 #include "CollectorServer.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
 #include "NetflowReceiver.hh"
+#include "Rule.hh"
 #include "Scheduler.hh"
 #include "ThreadPool.hh"
 
@@ -69,6 +71,26 @@ int main()
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };
 
+    // construct the alert engine and register a vendor-aware rule set; rules referencing
+    // payload fields use json pointer syntax so any nested telemetry field is reachable
+    auto alerts { std::make_shared<nm::AlertEngine>(cache, store) };
+    using namespace std::chrono_literals;
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("high_cpu",        "cpu",                       ">", 90.0,   5min, "critical"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("high_memory",     "memory",                    ">", 85.0,   5min, "warning"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("bgp_loss",        "/bgp_peers",                "<", 1.0,    60s,  "critical", "cisco"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("ospf_loss",       "/ospf_neighbors",           "<", 1.0,    60s,  "critical", "cisco"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("vpn_partial",     "/vpn_tunnels_up",           "<", 2.0,    60s,  "critical", "juniper"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("session_flood",   "/active_firewall_sessions", ">", 4500.0, 2min, "warning",  "juniper"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("ips_storm",       "/ips_alerts",               ">", 40.0,   0s,   "critical", "paloalto"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("url_block_surge", "/blocked_urls",             ">", 2000.0, 5min, "warning",  "paloalto"));
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("firewall_ddos",   "/blocked_connections",      ">", 150.0,  60s,  "critical", "paloalto"));
+    alerts->register_rule(std::make_unique<nm::OfflineRule>(   "device_offline",  60s,                                "critical"));
+    alerts->register_rule(std::make_unique<nm::StateChangeRule>("health_degraded", "degraded",                30s,    "warning"));
+    alerts->register_rule(std::make_unique<nm::StateChangeRule>("health_down",     "down",                    0s,     "critical"));
+    alerts->register_rule(std::make_unique<nm::RateOfChangeRule>("cpu_spike",      "cpu",     40.0, 30s, "warning"));
+    alerts->register_rule(std::make_unique<nm::RateOfChangeRule>("memory_jump",    "memory",  25.0, 60s, "info"));
+    alerts->register_rule(std::make_unique<nm::FlappingRule>(   "health_flapping", 3u, 5min, "warning"));
+
     // schedule a periodic snapshot of the cache and print one line per device
     scheduler.schedule([cache]
     {
@@ -78,6 +100,9 @@ int main()
         for (const auto& m : metrics)
             std::println("[{}] {} cpu {:.1f} memory {:.1f}", m.m_vendor, m.m_hostname, m.m_cpu, m.m_memory);
     }, std::chrono::milliseconds { 5000 });
+
+    // run the alert engine every 10s; rules with sustained windows still need many ticks before they fire
+    scheduler.schedule([alerts] { alerts->evaluate(); }, std::chrono::milliseconds { 10000 });
 
     // start the collector and scheduler, then idle until shutdown is requested
     server.start();

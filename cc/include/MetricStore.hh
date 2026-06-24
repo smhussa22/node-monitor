@@ -18,6 +18,7 @@
 #include <vector>
 
 // 3rd party headers
+#include <nlohmann/json.hpp>
 #include <pqxx/pqxx>
 
 // project headers
@@ -45,6 +46,12 @@ namespace NodeMonitor
 
         // fetch every row for the given host within [start, end], newest first
         std::vector<Metric> query(const std::string& hostname, std::chrono::system_clock::time_point start, std::chrono::system_clock::time_point end);
+
+        // create a row in the incidents table for a newly fired alert
+        void record_incident(const std::string& rule_name, const std::string& hostname, const std::string& severity, std::chrono::system_clock::time_point fired_at, const ::nlohmann::json& details);
+
+        // mark the active (unresolved) incident for this (rule, host) as resolved at the given time
+        void resolve_incident(const std::string& rule_name, const std::string& hostname, std::chrono::system_clock::time_point resolved_at);
 
         // total rows ever persisted via this process (useful for smoke tests)
         std::uint64_t insert_count() const noexcept;
