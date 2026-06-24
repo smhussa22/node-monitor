@@ -2,10 +2,13 @@
 
 // c sys headers
 
+// c sys headers
+
 // cpp stdlib headers
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <print>
 #include <thread>
@@ -23,6 +26,10 @@ namespace nm = NodeMonitor;
 
 int main()
 {
+
+    // force line buffering on stdout so log lines flush per-line under docker / k8s / piped redirection,
+    // which would otherwise switch libc to 4 KiB block buffering and swallow the heartbeat output
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
 
     // construct the shared cache and worker pool used by the collector
     auto cache { std::make_shared<nm::MetricCache>() };
