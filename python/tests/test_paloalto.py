@@ -56,8 +56,11 @@ def test_export_metrics_posts_payload(mock_post, sim):
     assert payload["vendor"] == "paloalto"
     assert 0 <= payload["ips_alerts"] <= 50
     assert 0 <= payload["blocked_connections"] <= 200
+    assert payload["blocked_urls"] >= 0
     assert isinstance(payload["url_filtering_stats"], dict)
     assert isinstance(payload["security_events"], list)
+    assert payload["health_status"] in {"healthy", "degraded", "down"}
+    assert payload["timestamp"] > 0
 
 
 # _generate_url_filtering_stats returns hit counts for the 6 expected categories

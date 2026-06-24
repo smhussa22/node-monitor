@@ -11,13 +11,15 @@ import requests
 @dataclass
 class JuniperSRXMetrics:
 
-    hostname: str                # name of the simulated firewall
-    vendor: str                  # device vendor identifier; juniper
-    cpu: float                   # cpu usage percentage
-    memory: float                # memory usage percentage
-    active_sessions: int         # current number of active firewall sessions
-    vpn_status: dict             # per-tunnel vpn up/down state
-    firewall_throughput: float   # current throughput in bytes per second
+    hostname: str                  # name of the simulated firewall
+    vendor: str                    # device vendor identifier; juniper
+    cpu: float                     # cpu usage percentage
+    memory: float                  # memory usage percentage
+    active_firewall_sessions: int  # current number of active firewall sessions
+    vpn_tunnels_up: int            # count of currently established vpn tunnels
+    firewall_throughput: float     # current throughput in bytes per second
+    health_status: str             # rolled-up device health: healthy, degraded, or down
+    timestamp: float               # epoch seconds when the snapshot was generated
 
 
 # simulates a juniper srx firewall that pushes metrics to a collector
@@ -58,9 +60,11 @@ class JuniperSRXSimulator:
             vendor="juniper",
             cpu=round(random.uniform(15.0, 80.0), 2),
             memory=round(random.uniform(40.0, 70.0), 2),
-            active_sessions=random.randint(1000, 5000),
-            vpn_status=self._generate_vpn_status(),
+            active_firewall_sessions=random.randint(1000, 5000),
+            vpn_tunnels_up=random.randint(0, 5),
             firewall_throughput=round(random.uniform(1e6, 1e9), 2),
+            health_status=random.choices(["healthy", "degraded", "down"], weights=[0.85, 0.12, 0.03])[0],
+            timestamp=time.time(),
         )
 
         # post the snapshot to the http collector
@@ -68,12 +72,6 @@ class JuniperSRXSimulator:
             requests.post(self.collector_url, json=asdict(metrics), timeout=5)
         except requests.RequestException as e:
             print(f"[{self.hostname}] metric export failed: {e}")
-
-    # generate randomized vpn tunnel up/down state
-    def _generate_vpn_status(self) -> dict:
-
-        # 90 percent chance each tunnel is up
-        return {f"tunnel-{i}": random.random() > 0.1 for i in range(3)}
 
     # background loop driving metric exports
     def _loop(self) -> None:

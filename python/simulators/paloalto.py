@@ -17,8 +17,11 @@ class PaloAltoMetrics:
     memory: float                  # memory usage percentage
     ips_alerts: int                # count of intrusion prevention system alerts
     blocked_connections: int       # count of connections blocked by firewall rules
+    blocked_urls: int              # count of urls blocked by url-filtering policy
     url_filtering_stats: dict      # per-category url filter hit counters
     security_events: List[dict]    # recent security event records
+    health_status: str             # rolled-up device health: healthy, degraded, or down
+    timestamp: float               # epoch seconds when the snapshot was generated
 
 
 # simulates a palo alto firewall that pushes security metrics to a collector
@@ -54,6 +57,7 @@ class PaloAltoSimulator:
     def export_metrics(self) -> None:
 
         # build a fresh metrics snapshot with fluctuating fake values
+        url_stats = self._generate_url_filtering_stats()
         metrics = PaloAltoMetrics(
             hostname=self.hostname,
             vendor="paloalto",
@@ -61,8 +65,11 @@ class PaloAltoSimulator:
             memory=round(random.uniform(40.0, 75.0), 2),
             ips_alerts=random.randint(0, 50),
             blocked_connections=random.randint(0, 200),
-            url_filtering_stats=self._generate_url_filtering_stats(),
+            blocked_urls=sum(url_stats.values()),
+            url_filtering_stats=url_stats,
             security_events=self._generate_security_events(),
+            health_status=random.choices(["healthy", "degraded", "down"], weights=[0.85, 0.12, 0.03])[0],
+            timestamp=time.time(),
         )
 
         # post the snapshot to the http collector

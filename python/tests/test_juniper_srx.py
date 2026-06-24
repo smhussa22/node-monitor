@@ -56,17 +56,11 @@ def test_export_metrics_posts_payload(mock_post, sim):
     assert payload["vendor"] == "juniper"
     assert 0.0 <= payload["cpu"] <= 100.0
     assert 0.0 <= payload["memory"] <= 100.0
-    assert 1000 <= payload["active_sessions"] <= 5000
-    assert isinstance(payload["vpn_status"], dict)
+    assert 1000 <= payload["active_firewall_sessions"] <= 5000
+    assert 0 <= payload["vpn_tunnels_up"] <= 5
     assert payload["firewall_throughput"] > 0
-
-
-# _generate_vpn_status returns 3 tunnels with boolean status values
-def test_vpn_status_structure(sim):
-
-    status = sim._generate_vpn_status()
-    assert set(status.keys()) == {"tunnel-0", "tunnel-1", "tunnel-2"}
-    assert all(isinstance(v, bool) for v in status.values())
+    assert payload["health_status"] in {"healthy", "degraded", "down"}
+    assert payload["timestamp"] > 0
 
 
 # calling start twice does not spawn a second thread

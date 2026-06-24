@@ -20,6 +20,8 @@ class CiscoRouterMetrics:
     interface_stats: dict   # per-interface (connection point on router) byte and packet counters
     ospf_neighbors: int     # count of active open shortest path first (ospf) neighbors
     bgp_peers: int          # count of active border gateway protocol (bgp) peers
+    health_status: str      # rolled-up device health: healthy, degraded, or down
+    timestamp: float        # epoch seconds when the snapshot was generated
 
 
 # simulates a cisco router that pushes metrics and netflow records to a collector
@@ -69,6 +71,8 @@ class CiscoRouterSimulator:
             interface_stats=self._generate_interface_stats(),
             ospf_neighbors=random.randint(2, 5),
             bgp_peers=random.randint(1, 3),
+            health_status=random.choices(["healthy", "degraded", "down"], weights=[0.85, 0.12, 0.03])[0],
+            timestamp=time.time(),
         )
 
         # post the snapshot to the http collector
@@ -82,10 +86,12 @@ class CiscoRouterSimulator:
 
         if self.netflow_socket is None: return
 
-        # build a randomized flow record
+        # build a randomized flow record matching the netflow schema in the project spec
         record = {
-            "src": f"10.0.0.{random.randint(1, 254)}",
-            "dst": f"8.8.{random.randint(0, 255)}.{random.randint(1, 254)}",
+            "src_ip": f"10.0.0.{random.randint(1, 254)}",
+            "dst_ip": f"8.8.{random.randint(0, 255)}.{random.randint(1, 254)}",
+            "src_port": random.randint(1024, 65535),
+            "dst_port": random.choice([80, 443, 22, 53, 3389, 8080, random.randint(1024, 65535)]),
             "protocol": random.choice(["TCP", "UDP", "ICMP"]),
             "bytes": random.randint(1024, 500_000_000),
             "duration": random.randint(1, 60),

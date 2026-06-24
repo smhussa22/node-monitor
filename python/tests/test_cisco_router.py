@@ -65,6 +65,8 @@ def test_export_metrics_posts_payload(mock_post, sim):
     assert "interface_stats" in payload
     assert "ospf_neighbors" in payload
     assert "bgp_peers" in payload
+    assert payload["health_status"] in {"healthy", "degraded", "down"}
+    assert payload["timestamp"] > 0
 
 
 # export_netflow sends a json-encoded flow record via udp
@@ -79,6 +81,11 @@ def test_export_netflow_sends_udp(sim):
     payload_bytes, addr = mock_socket.sendto.call_args[0]
     record = json.loads(payload_bytes.decode("utf-8"))
     assert record["hostname"] == "router-1"
+    assert "src_ip" in record
+    assert "dst_ip" in record
+    assert 1024 <= record["src_port"] <= 65535
+    assert isinstance(record["dst_port"], int)
+    assert record["protocol"] in {"TCP", "UDP", "ICMP"}
     assert addr == ("127.0.0.1", 2055)
 
 
