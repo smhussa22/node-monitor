@@ -1,0 +1,82 @@
+# local dev / interactive test rig
+# brings up postgres + collector + one simulator pod per vendor on a shared network
+# usage:
+#   docker compose up -d           # start everything in the background
+#   docker compose logs -f collector
+#   docker compose down -v         # tear down and wipe the postgres volume
+
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: nm-postgres
+    environment:
+      POSTGRES_USER: nodemonitor
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: node_monitor
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nodemonitor -d node_monitor"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  collector:
+    image: node-monitor-collector:latest
+    container_name: nm-collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: nodemonitor
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: node_monitor
+    ports:
+      - "8000:8000"
+      - "2055:2055/udp"
+
+  simulator-cisco:
+    image: node-monitor-simulator:latest
+    depends_on:
+      - collector
+    command:
+      - "--vendor=cisco"
+      - "--count=20"
+      - "--interval=5"
+      - "--duration=0"
+      - "--collector=http://collector:8000"
+      - "--netflow-host=collector"
+      - "--netflow-port=2055"
+      - "--hostname-prefix=ciscopod"
+
+  simulator-juniper:
+    image: node-monitor-simulator:latest
+    depends_on:
+      - collector
+    command:
+      - "--vendor=juniper"
+      - "--count=10"
+      - "--interval=5"
+      - "--duration=0"
+      - "--collector=http://collector:8000"
+      - "--hostname-prefix=junpod"
+
+  simulator-paloalto:
+    image: node-monitor-simulator:latest
+    depends_on:
+      - collector
+    command:
+      - "--vendor=paloalto"
+      - "--count=10"
+      - "--interval=5"
+      - "--duration=0"
+      - "--collector=http://collector:8000"
+      - "--hostname-prefix=papod"
+
+volumes:
+  pg-data:
