@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}netflow · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">total flows</div>
+                <div class="display-6 fw-bold">{{ total.total_flows or 0 }}</div>
+                <div class="text-secondary small">window: {{ current_window }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">total bytes</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(total.total_bytes or 0) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <canvas id="protocol-chart" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">top talkers (src → dst by total bytes)</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>src</th><th>dst</th><th>flows</th><th>bytes</th></tr></thead>
+                    <tbody>
+                    {% for t in top_talkers %}
+                        <tr>
+                            <td><code>{{ t.src_ip }}</code></td>
+                            <td><code>{{ t.dst_ip }}</code></td>
+                            <td>{{ t.flows }}</td>
+                            <td>{{ "{:,}".format(t.total_bytes) }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="4" class="text-secondary text-center py-3">no flows in this window</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">top destination ports</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>port</th><th>flows</th><th>bytes</th></tr></thead>
+                    <tbody>
+                    {% for p in top_ports %}
+                        <tr>
+                            <td><span class="fw-bold">{{ p.dst_port }}</span></td>
+                            <td>{{ p.flows }}</td>
+                            <td>{{ "{:,}".format(p.total_bytes) }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="3" class="text-secondary text-center py-3">no flows</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    renderProtocolChart({{ protocols_json | safe }});
+</script>
+{% endblock %}

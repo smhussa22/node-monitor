@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}devices · node-monitor{% endblock %}
+
+{% block content %}
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-8">
+        <input class="form-control" type="text" name="filter" value="{{ filter_str }}"
+               placeholder="hostname=router1 AND vendor=cisco AND health_status=degraded">
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary w-100" type="submit">filter</button>
+    </div>
+    <div class="col-md-2">
+        <a class="btn btn-outline-secondary w-100" href="/devices">clear</a>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between">
+        <span class="fw-semibold">{{ devices | length }} devices</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>host</th><th>vendor</th><th>health</th>
+                    <th>cpu</th><th>memory</th>
+                    <th class="text-secondary">cpu (30m)</th>
+                    <th class="text-secondary">memory (30m)</th>
+                    <th>last seen</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for d in devices %}
+                <tr>
+                    <td><a href="/devices/{{ d.hostname }}">{{ d.hostname }}</a></td>
+                    <td>{{ d.vendor }}</td>
+                    <td>
+                        {% set h = d.health_status or 'unknown' %}
+                        <span class="badge {{ health_class.get(h, 'bg-secondary') }}">{{ h }}</span>
+                    </td>
+                    <td><span class="{% if d.cpu > 85 %}text-danger fw-bold{% endif %}">{{ "%.1f"|format(d.cpu) }}</span></td>
+                    <td><span class="{% if d.memory > 80 %}text-warning-emphasis fw-bold{% endif %}">{{ "%.1f"|format(d.memory) }}</span></td>
+                    <td><canvas class="sparkline" data-host="{{ d.hostname }}" data-field="cpu" width="100" height="24"></canvas></td>
+                    <td><canvas class="sparkline" data-host="{{ d.hostname }}" data-field="memory" width="100" height="24"></canvas></td>
+                    <td class="text-secondary small">{{ d.last_seen }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8" class="text-secondary text-center py-3">no devices match this filter</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>renderSparklines();</script>
+{% endblock %}

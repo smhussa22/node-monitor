@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}topology · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">topology</h3>
+    <div>
+        <span class="badge bg-success me-1">healthy</span>
+        <span class="badge bg-warning text-dark me-1">degraded</span>
+        <span class="badge bg-danger me-1">down</span>
+        <span class="badge bg-secondary">offline / unknown</span>
+    </div>
+</div>
+
+{% for vendor, hosts in by_vendor.items() %}
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between fw-semibold">
+            <span>{{ vendor }}</span>
+            <span class="badge bg-dark">{{ hosts | length }} devices</span>
+        </div>
+        <div class="card-body">
+            <div class="topology-grid">
+                {% for h in hosts %}
+                    <a href="/devices/{{ h.hostname }}"
+                       class="topology-tile health-{{ h.effective_health }}"
+                       title="{{ h.hostname }} ({{ h.effective_health }}, last seen {{ h.age_s }}s ago)">
+                        <span class="topology-host">{{ h.hostname }}</span>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+{% else %}
+    <div class="alert alert-secondary">no devices have reported yet</div>
+{% endfor %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    setTimeout(() => location.reload(), 15000);
+</script>
+{% endblock %}

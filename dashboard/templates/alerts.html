@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}alerts · node-monitor{% endblock %}
+
+{% block content %}
+
+<form method="get" class="row g-2 mb-3 align-items-center">
+    <div class="col-md-6">
+        <input class="form-control" type="text" name="filter" value="{{ filter_str }}"
+               placeholder="hostname=router1 AND severity=critical">
+    </div>
+    <div class="col-md-3">
+        <select class="form-select" name="severity">
+            <option value="" {% if not severity %}selected{% endif %}>any severity</option>
+            <option value="critical" {% if severity == 'critical' %}selected{% endif %}>critical only</option>
+            <option value="warning"  {% if severity == 'warning'  %}selected{% endif %}>warning only</option>
+            <option value="info"     {% if severity == 'info'     %}selected{% endif %}>info only</option>
+        </select>
+    </div>
+    <div class="col-md-1">
+        <button class="btn btn-primary w-100" type="submit">filter</button>
+    </div>
+    <div class="col-md-2">
+        <a class="btn btn-outline-secondary w-100" href="/alerts">clear</a>
+    </div>
+</form>
+
+<div class="card mb-4">
+    <div class="card-header fw-semibold d-flex justify-content-between">
+        <span>live alerts</span>
+        <span class="badge bg-danger">{{ active | length }} active</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr><th>severity</th><th>rule</th><th>host</th><th>fired</th><th>details</th></tr>
+            </thead>
+            <tbody>
+            {% for a in active %}
+                <tr>
+                    <td><span class="badge {{ severity_class.get(a.severity, 'bg-secondary') }}">{{ a.severity }}</span></td>
+                    <td>{{ a.rule_name }}</td>
+                    <td><a href="/devices/{{ a.hostname }}">{{ a.hostname }}</a></td>
+                    <td class="small">{{ a.fired_at }}</td>
+                    <td class="small text-secondary">{{ a.details.description if a.details else '' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="text-secondary text-center py-3">no live alerts</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header fw-semibold">recently resolved</div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr><th>severity</th><th>rule</th><th>host</th><th>fired</th><th>resolved</th></tr>
+            </thead>
+            <tbody>
+            {% for r in recent %}
+                <tr>
+                    <td><span class="badge {{ severity_class.get(r.severity, 'bg-secondary') }}">{{ r.severity }}</span></td>
+                    <td>{{ r.rule_name }}</td>
+                    <td><a href="/devices/{{ r.hostname }}">{{ r.hostname }}</a></td>
+                    <td class="small">{{ r.fired_at }}</td>
+                    <td class="small">{{ r.resolved_at }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" class="text-secondary text-center py-3">no recent resolutions</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // refresh the page every 10s so live alerts stay current
+    setTimeout(() => location.reload(), 10000);
+</script>
+{% endblock %}

@@ -9,6 +9,7 @@ echo ">>> deleting workload manifests (best effort)"
 kubectl delete -f k8s/simulator-cisco.yaml --ignore-not-found
 kubectl delete -f k8s/simulator-juniper.yaml --ignore-not-found
 kubectl delete -f k8s/simulator-paloalto.yaml --ignore-not-found
+kubectl delete -f k8s/dashboard.yaml --ignore-not-found
 kubectl delete -f k8s/collector.yaml --ignore-not-found
 kubectl delete -f k8s/postgres.yaml --ignore-not-found
 

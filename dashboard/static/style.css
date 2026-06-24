@@ -1,0 +1,51 @@
+/* node-monitor dashboard — minimal layer on top of bootstrap */
+
+.kpi-card { position: relative; }
+.kpi-card .stretched-link { z-index: 1; }
+
+.sparkline { display: inline-block; vertical-align: middle; }
+
+/* topology grid: dense colored tiles, one per device */
+.topology-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px;
+}
+.topology-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: white;
+    text-decoration: none;
+    transition: transform 80ms ease-in-out;
+    overflow: hidden;
+}
+.topology-tile:hover {
+    transform: scale(1.05);
+    color: white;
+    z-index: 2;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.topology-host {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    padding: 0 6px;
+}
+.health-healthy  { background: #198754; }
+.health-degraded { background: #ffc107; color: #212529; }
+.health-down     { background: #dc3545; }
+.health-offline  { background: #495057; }
+.health-unknown  { background: #adb5bd; color: #212529; }
+
+/* live feed row enter animation */
+@keyframes flash-in {
+    from { background: rgba(13,110,253,0.15); }
+    to   { background: transparent; }
+}
+#live-feed tr.new { animation: flash-in 1.2s ease-out; }
+
+pre { white-space: pre-wrap; word-break: break-word; }

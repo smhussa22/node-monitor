@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}overview · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card kpi-card border-danger">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">critical alerts</div>
+                <div class="display-6 fw-bold text-danger">{{ severity_counts.critical }}</div>
+                <a href="/alerts?severity=critical" class="stretched-link"></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card border-warning">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">warnings</div>
+                <div class="display-6 fw-bold text-warning-emphasis">{{ severity_counts.warning }}</div>
+                <a href="/alerts?severity=warning" class="stretched-link"></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card border-info">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">info alerts</div>
+                <div class="display-6 fw-bold text-info-emphasis">{{ severity_counts.info }}</div>
+                <a href="/alerts?severity=info" class="stretched-link"></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card border-secondary">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">total devices</div>
+                <div class="display-6 fw-bold">
+                    {% set total = by_vendor | sum(attribute='hosts') %}
+                    {{ total }}
+                </div>
+                <a href="/devices" class="stretched-link"></a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header fw-semibold">devices by vendor</div>
+            <ul class="list-group list-group-flush">
+                {% for v in by_vendor %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <a href="/devices?filter=vendor={{ v.vendor }}">{{ v.vendor }}</a>
+                        <span class="badge bg-secondary">{{ v.hosts }}</span>
+                    </li>
+                {% else %}
+                    <li class="list-group-item text-secondary">no metrics in this window</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header fw-semibold">top alert-firing rules</div>
+            <ul class="list-group list-group-flush">
+                {% for r in top_rules %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><span class="badge {{ severity_class.get(r.severity, 'bg-secondary') }} me-2">{{ r.severity }}</span>{{ r.rule_name }}</span>
+                        <span class="badge bg-dark">{{ r.fired }}</span>
+                    </li>
+                {% else %}
+                    <li class="list-group-item text-secondary">no alerts yet</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header fw-semibold">noisiest hosts</div>
+            <ul class="list-group list-group-flush">
+                {% for n in noisiest %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <a href="/devices/{{ n.hostname }}">{{ n.hostname }}</a>
+                        <span class="badge bg-dark">{{ n.incidents }}</span>
+                    </li>
+                {% else %}
+                    <li class="list-group-item text-secondary">no incidents yet</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">top cpu consumers (now)</div>
+            <table class="table table-sm mb-0">
+                <thead><tr><th>host</th><th>vendor</th><th>cpu</th><th>mem</th></tr></thead>
+                <tbody>
+                {% for d in top_cpu %}
+                    <tr>
+                        <td><a href="/devices/{{ d.hostname }}">{{ d.hostname }}</a></td>
+                        <td>{{ d.vendor }}</td>
+                        <td><span class="text-danger fw-bold">{{ "%.1f"|format(d.cpu) }}</span></td>
+                        <td>{{ "%.1f"|format(d.memory) }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">corpus</div>
+            <ul class="list-group list-group-flush">
+                <li class="list-group-item d-flex justify-content-between">metric rows<span class="badge bg-dark">{{ summary.metric_rows or 0 }}</span></li>
+                <li class="list-group-item d-flex justify-content-between">incident rows<span class="badge bg-dark">{{ summary.incident_rows or 0 }}</span></li>
+                <li class="list-group-item d-flex justify-content-between">netflow rows<span class="badge bg-dark">{{ summary.flow_rows or 0 }}</span></li>
+                <li class="list-group-item d-flex justify-content-between">last metric<span class="text-secondary small">{{ summary.last_metric }}</span></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ hostname }} · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">
+        {{ hostname }}
+        {% if latest %}
+            <small class="text-secondary">· {{ latest.vendor }}</small>
+            {% set h = latest.health_status or 'unknown' %}
+            <span class="badge {{ health_class.get(h, 'bg-secondary') }} ms-2">{{ h }}</span>
+        {% endif %}
+    </h3>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary btn-sm" href="/api/devices/{{ hostname }}/csv?window={{ current_window }}">csv export</a>
+        <a class="btn btn-outline-secondary btn-sm" href="/devices">back to list</a>
+    </div>
+</div>
+
+{% if not latest %}
+    <div class="alert alert-warning">no metrics found for this host</div>
+{% else %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">cpu</div>
+                <div class="display-6 fw-bold">{{ "%.1f"|format(latest.cpu) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">memory</div>
+                <div class="display-6 fw-bold">{{ "%.1f"|format(latest.memory) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">last seen</div>
+                <div class="fs-5">{{ latest.ts }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header fw-semibold">cpu &amp; memory over {{ current_window }}</div>
+    <div class="card-body">
+        <canvas id="history-chart" height="100"></canvas>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">raw telemetry payload</div>
+            <pre class="mb-0 p-3 small bg-light rounded">{{ payload_pretty }}</pre>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">recent incidents (window: {{ current_window }})</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>rule</th><th>severity</th><th>fired</th><th>resolved</th></tr></thead>
+                    <tbody>
+                    {% for i in incidents %}
+                        <tr>
+                            <td>{{ i.rule_name }}</td>
+                            <td><span class="badge {{ severity_class.get(i.severity, 'bg-secondary') }}">{{ i.severity }}</span></td>
+                            <td class="small">{{ i.fired_at }}</td>
+                            <td class="small">{{ i.resolved_at or '—' }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="4" class="text-secondary text-center py-3">no incidents in this window</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    renderHistoryChart("{{ hostname }}", "{{ current_window }}");
+</script>
+{% endblock %}
