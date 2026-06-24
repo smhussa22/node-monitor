@@ -2,6 +2,7 @@
 #define NODE_MONITOR_NETFLOW_RECEIVER_HH
 
 // related headers
+#include "MetricStore.hh"
 #include "SocketFd.hh"
 
 // c sys headers
@@ -9,6 +10,7 @@
 // cpp stdlib headers
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -28,7 +30,7 @@ namespace NodeMonitor
     public:
 
         NetflowReceiver() = delete;
-        explicit NetflowReceiver(std::uint16_t port);
+        NetflowReceiver(std::uint16_t port, std::shared_ptr<MetricStore> store);
         ~NetflowReceiver();
 
         NetflowReceiver(const NetflowReceiver&) = delete;
@@ -67,6 +69,7 @@ namespace NodeMonitor
         std::atomic<std::uint64_t> m_total_flows { 0 }; // total flow records successfully parsed
         std::unordered_map<std::string, std::uint64_t> m_per_host_flows { }; // per source hostname flow counts
         mutable std::mutex m_mutex { }; // protects the per host flow count map
+        std::shared_ptr<MetricStore> m_store { }; // optional persistence sink for received flow records
 
     };
 

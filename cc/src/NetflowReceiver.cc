@@ -20,8 +20,8 @@
 namespace NodeMonitor
 {
 
-    NetflowReceiver::NetflowReceiver(std::uint16_t port)
-        : m_port { port }
+    NetflowReceiver::NetflowReceiver(std::uint16_t port, std::shared_ptr<MetricStore> store)
+        : m_port { port }, m_store { std::move(store) }
     {
 
     }
@@ -152,6 +152,9 @@ namespace NodeMonitor
 
                 // heartbeat every 100 flows so the log does not get spammed
                 if (total % 100uz == 0uz) std::println("[netflow] total={} unique_hosts={}", total, unique_hosts);
+
+                // persist the flow record alongside the in-memory counter so the dashboard can query it later
+                if (m_store) m_store->persist_flow(parsed);
             }
             catch (const ::nlohmann::json::exception& e)
             {

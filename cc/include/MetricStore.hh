@@ -53,6 +53,9 @@ namespace NodeMonitor
         // mark the active (unresolved) incident for this (rule, host) as resolved at the given time
         void resolve_incident(const std::string& rule_name, const std::string& hostname, std::chrono::system_clock::time_point resolved_at);
 
+        // append one parsed netflow record to the flows table; missing optional fields default cleanly
+        void persist_flow(const ::nlohmann::json& flow);
+
         // total rows ever persisted via this process (useful for smoke tests)
         std::uint64_t insert_count() const noexcept;
 

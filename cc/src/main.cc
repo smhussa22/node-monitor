@@ -66,7 +66,7 @@ int main()
     nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 } };
 
     // construct the netflow receiver bound to the standard netflow v5/v9 port
-    nm::NetflowReceiver netflow { std::uint16_t { 2055 } };
+    nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store };
 
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };

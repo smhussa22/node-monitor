@@ -68,6 +68,42 @@ namespace NodeMonitor
 
     }
 
+    void MetricStore::persist_flow(const ::nlohmann::json& flow)
+    {
+
+        auto conn { acquire_connection() };
+        try
+        {
+            ::pqxx::work tx { *conn };
+            tx.exec(
+                "INSERT INTO flows (src_ip, dst_ip, src_port, dst_port, protocol, bytes, duration, hostname) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                ::pqxx::params {
+                    flow.value("src_ip", std::string { }),
+                    flow.value("dst_ip", std::string { }),
+                    flow.value("src_port", 0),
+                    flow.value("dst_port", 0),
+                    flow.value("protocol", std::string { }),
+                    flow.value("bytes", std::int64_t { 0 }),
+                    flow.value("duration", 0),
+                    flow.value("hostname", std::string { })
+                }
+            );
+            tx.commit();
+            m_insert_count.fetch_add(1uz);
+        }
+        catch (const ::pqxx::sql_error& e)
+        {
+            std::println("error: flow insert failed: {} (sql: {})", e.what(), e.query());
+        }
+        catch (const std::exception& e)
+        {
+            std::println("error: flow insert failed: {}", e.what());
+        }
+        release_connection(std::move(conn));
+
+    }
+
     std::vector<Metric> MetricStore::query(const std::string& hostname, std::chrono::system_clock::time_point start, std::chrono::system_clock::time_point end)
     {
 
@@ -202,6 +238,24 @@ namespace NodeMonitor
             );
             tx.exec("CREATE INDEX IF NOT EXISTS idx_incidents_active ON incidents (rule_name, hostname) WHERE resolved_at IS NULL");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_incidents_fired ON incidents (fired_at DESC)");
+            tx.exec(
+                "CREATE TABLE IF NOT EXISTS flows ("
+                "    id           BIGSERIAL    PRIMARY KEY,"
+                "    src_ip       TEXT         NOT NULL,"
+                "    dst_ip       TEXT         NOT NULL,"
+                "    src_port     INTEGER,"
+                "    dst_port     INTEGER,"
+                "    protocol     TEXT         NOT NULL,"
+                "    bytes        BIGINT       NOT NULL,"
+                "    duration     INTEGER,"
+                "    hostname     TEXT         NOT NULL,"
+                "    received_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()"
+                ")"
+            );
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_received_at ON flows (received_at DESC)");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_dst_port    ON flows (dst_port)");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_src_dst     ON flows (src_ip, dst_ip)");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_hostname    ON flows (hostname)");
             tx.commit();
         }
         catch (const std::exception& e)
