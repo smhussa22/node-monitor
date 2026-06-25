@@ -2,7 +2,7 @@
 FROM gcc:14 AS build
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends cmake git ca-certificates libpq-dev \
+ && apt-get install -y --no-install-recommends cmake git ca-certificates libpq-dev libcurl4-openssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -19,7 +19,7 @@ RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
 FROM gcc:14
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libpq5 \
+ && apt-get install -y --no-install-recommends libpq5 libcurl4 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/build/node_monitor /usr/local/bin/node_monitor

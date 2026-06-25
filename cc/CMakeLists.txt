@@ -26,20 +26,25 @@ FetchContent_MakeAvailable(libpqxx)
 
 include_directories(include)
 
+find_package(CURL REQUIRED)
+
 set(LIB_SOURCES
+    src/Action.cc
     src/AlertEngine.cc
     src/CollectorServer.cc
+    src/K8sClient.cc
     src/MetricCache.cc
     src/MetricStore.cc
     src/NetflowReceiver.cc
     src/Rule.cc
+    src/RunbookEngine.cc
     src/Scheduler.cc
     src/SocketFd.cc
     src/ThreadPool.cc
 )
 
 add_library(node_monitor_lib STATIC ${LIB_SOURCES})
-target_link_libraries(node_monitor_lib PUBLIC nlohmann_json::nlohmann_json libpqxx::pqxx)
+target_link_libraries(node_monitor_lib PUBLIC nlohmann_json::nlohmann_json libpqxx::pqxx CURL::libcurl)
 
 add_executable(node_monitor src/main.cc)
 target_link_libraries(node_monitor PRIVATE node_monitor_lib)
