@@ -53,6 +53,9 @@ namespace NodeMonitor
         // mark the active (unresolved) incident for this (rule, host) as resolved at the given time
         void resolve_incident(const std::string& rule_name, const std::string& hostname, std::chrono::system_clock::time_point resolved_at);
 
+        // append an audit row to the actions table; used by the runbook engine on every action attempt
+        void record_action(const std::string& runbook_name, const std::string& rule_name, const std::string& hostname, const std::string& action_type, const std::string& target, const std::string& status, std::chrono::system_clock::time_point started_at, std::chrono::system_clock::time_point completed_at, const std::string& error_message, int response_code);
+
         // append one parsed netflow record to the flows table; missing optional fields default cleanly
         void persist_flow(const ::nlohmann::json& flow);
 

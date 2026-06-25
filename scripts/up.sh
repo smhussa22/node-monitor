@@ -41,6 +41,7 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/late
 
 echo ">>> applying manifests"
 kubectl apply -f k8s/postgres.yaml
+kubectl apply -f k8s/collector-rbac.yaml
 kubectl apply -f k8s/collector.yaml
 kubectl apply -f k8s/dashboard.yaml
 kubectl apply -f k8s/simulator-cisco.yaml

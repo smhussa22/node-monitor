@@ -179,6 +179,39 @@ namespace NodeMonitor
 
     }
 
+    void MetricStore::record_action(const std::string& runbook_name, const std::string& rule_name, const std::string& hostname, const std::string& action_type, const std::string& target, const std::string& status, std::chrono::system_clock::time_point started_at, std::chrono::system_clock::time_point completed_at, const std::string& error_message, int response_code)
+    {
+
+        auto conn { acquire_connection() };
+        try
+        {
+            ::pqxx::work tx { *conn };
+            tx.exec(
+                "INSERT INTO actions (runbook_name, rule_name, hostname, action_type, target, status, started_at, completed_at, error_message, response_code) "
+                "VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7), to_timestamp($8), $9, $10)",
+                ::pqxx::params {
+                    runbook_name,
+                    rule_name,
+                    hostname,
+                    action_type,
+                    target,
+                    status,
+                    std::chrono::duration<double>(started_at.time_since_epoch()).count(),
+                    std::chrono::duration<double>(completed_at.time_since_epoch()).count(),
+                    error_message,
+                    response_code
+                }
+            );
+            tx.commit();
+        }
+        catch (const std::exception& e)
+        {
+            std::println("error: action insert failed: {}", e.what());
+        }
+        release_connection(std::move(conn));
+
+    }
+
     void MetricStore::resolve_incident(const std::string& rule_name, const std::string& hostname, std::chrono::system_clock::time_point resolved_at)
     {
 
@@ -256,6 +289,23 @@ namespace NodeMonitor
             tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_dst_port    ON flows (dst_port)");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_src_dst     ON flows (src_ip, dst_ip)");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_hostname    ON flows (hostname)");
+            tx.exec(
+                "CREATE TABLE IF NOT EXISTS actions ("
+                "    id            BIGSERIAL    PRIMARY KEY,"
+                "    runbook_name  TEXT         NOT NULL,"
+                "    rule_name     TEXT         NOT NULL,"
+                "    hostname      TEXT         NOT NULL,"
+                "    action_type   TEXT         NOT NULL,"
+                "    target        TEXT         NOT NULL,"
+                "    status        TEXT         NOT NULL,"
+                "    started_at    TIMESTAMPTZ  NOT NULL,"
+                "    completed_at  TIMESTAMPTZ,"
+                "    error_message TEXT,"
+                "    response_code INTEGER"
+                ")"
+            );
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_actions_runbook_host ON actions (runbook_name, hostname, started_at DESC)");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_actions_status ON actions (status, started_at DESC)");
             tx.commit();
         }
         catch (const std::exception& e)

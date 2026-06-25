@@ -96,6 +96,7 @@ def home() -> str:
         "SELECT (SELECT COUNT(*) FROM metrics) AS metric_rows, "
         "       (SELECT COUNT(*) FROM incidents) AS incident_rows, "
         "       (SELECT COUNT(*) FROM flows) AS flow_rows, "
+        "       (SELECT COUNT(*) FROM actions) AS action_rows, "
         "       (SELECT MAX(ts) FROM metrics) AS last_metric"
     ) or {}
 
@@ -262,6 +263,35 @@ def timeline() -> str:
 def live() -> str:
 
     return render_template("live.html")
+
+
+@app.route("/actions")
+def actions() -> str:
+
+    window = current_window()
+    interval = window_interval(window)
+    rows = query_all(
+        "SELECT runbook_name, rule_name, hostname, action_type, target, status, started_at, completed_at, error_message, response_code "
+        "FROM actions "
+        f"WHERE started_at > NOW() - INTERVAL '{interval}' "
+        "ORDER BY started_at DESC LIMIT 500"
+    )
+    by_status = query_all(
+        "SELECT status, COUNT(*) AS n FROM actions "
+        f"WHERE started_at > NOW() - INTERVAL '{interval}' "
+        "GROUP BY status ORDER BY n DESC"
+    )
+    by_runbook = query_all(
+        "SELECT runbook_name, COUNT(*) AS total, "
+        "       COUNT(*) FILTER (WHERE status = 'success') AS success, "
+        "       COUNT(*) FILTER (WHERE status = 'failed') AS failed, "
+        "       COUNT(*) FILTER (WHERE status = 'dry_run') AS dry_run, "
+        "       COUNT(*) FILTER (WHERE status = 'cooldown_suppressed') AS cooldown "
+        "FROM actions "
+        f"WHERE started_at > NOW() - INTERVAL '{interval}' "
+        "GROUP BY runbook_name ORDER BY total DESC"
+    )
+    return render_template("actions.html", actions=rows, by_status=by_status, by_runbook=by_runbook)
 
 
 @app.route("/netflow")

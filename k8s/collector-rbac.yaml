@@ -1,0 +1,38 @@
+# RBAC for the collector's self-healing runbook engine. minimal verbs only — list+delete on pods so RestartPodAction
+# can find and recycle a simulator pod; get+patch on deployments/scale so ScaleDeploymentAction can rescale itself.
+# No cluster-scoped permissions; everything is namespaced to default.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: collector
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: collector-runbook
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: collector-runbook
+subjects:
+  - kind: ServiceAccount
+    name: collector
+roleRef:
+  kind: Role
+  name: collector-runbook
+  apiGroup: rbac.authorization.k8s.io

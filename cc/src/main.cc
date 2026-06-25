@@ -20,12 +20,15 @@
 // 3rd party headers
 
 // project headers
+#include "Action.hh"
 #include "AlertEngine.hh"
 #include "CollectorServer.hh"
+#include "K8sClient.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
 #include "NetflowReceiver.hh"
 #include "Rule.hh"
+#include "RunbookEngine.hh"
 #include "Scheduler.hh"
 #include "ThreadPool.hh"
 
@@ -71,10 +74,64 @@ int main()
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };
 
+    // detect kubernetes credentials (dry-run when not in-cluster); shared with every Action via ActionContext
+    std::shared_ptr<nm::K8sClient> k8s { nm::K8sClient::create_from_environment() };
+
+    // construct the self-healing engine and register runbooks; each runbook binds one rule to an action list
+    auto runbooks { std::make_shared<nm::RunbookEngine>(k8s, store) };
+    using namespace std::chrono_literals;
+
+    // device_offline: log + notify; for cisco hosts, also attempt to restart the parent simulator pod
+    {
+        nm::Runbook book { };
+        book.m_name = "rb_device_offline";
+        book.m_rule_name = "device_offline";
+        book.m_cooldown = 5min;
+        book.m_max_per_hour = 30;
+        book.m_actions.push_back(std::make_unique<nm::LogOnlyAction>("device ${hostname} offline; restarting backing pod"));
+        book.m_actions.push_back(std::make_unique<nm::WebhookNotifyAction>(""));
+        book.m_actions.push_back(std::make_unique<nm::RestartPodAction>("default", "app=simulator"));
+        runbooks->register_runbook(std::move(book));
+    }
+
+    // high_cpu on the collector: scale up by 1 replica, capped at 5
+    {
+        nm::Runbook book { };
+        book.m_name = "rb_high_cpu";
+        book.m_rule_name = "high_cpu";
+        book.m_cooldown = 2min;
+        book.m_max_per_hour = 20;
+        book.m_actions.push_back(std::make_unique<nm::ScaleDeploymentAction>("default", "collector", 1, 1, 5));
+        runbooks->register_runbook(std::move(book));
+    }
+
+    // ips_storm: security alert, no auto-remediation, notify only so humans triage
+    {
+        nm::Runbook book { };
+        book.m_name = "rb_ips_storm";
+        book.m_rule_name = "ips_storm";
+        book.m_cooldown = 30s;
+        book.m_max_per_hour = 100;
+        book.m_actions.push_back(std::make_unique<nm::LogOnlyAction>("ips storm on ${hostname}; escalating to security oncall"));
+        book.m_actions.push_back(std::make_unique<nm::WebhookNotifyAction>(""));
+        runbooks->register_runbook(std::move(book));
+    }
+
+    // health_down: log + notify; this is a soft restart trigger so we also try to recycle the pod
+    {
+        nm::Runbook book { };
+        book.m_name = "rb_health_down";
+        book.m_rule_name = "health_down";
+        book.m_cooldown = 3min;
+        book.m_max_per_hour = 30;
+        book.m_actions.push_back(std::make_unique<nm::LogOnlyAction>("${hostname} reported health_status=down; recycling pod"));
+        book.m_actions.push_back(std::make_unique<nm::RestartPodAction>("default", "app=simulator"));
+        runbooks->register_runbook(std::move(book));
+    }
+
     // construct the alert engine and register a vendor-aware rule set; rules referencing
     // payload fields use json pointer syntax so any nested telemetry field is reachable
-    auto alerts { std::make_shared<nm::AlertEngine>(cache, store) };
-    using namespace std::chrono_literals;
+    auto alerts { std::make_shared<nm::AlertEngine>(cache, store, runbooks) };
     alerts->register_rule(std::make_unique<nm::ThresholdRule>("high_cpu",        "cpu",                       ">", 90.0,   5min, "critical"));
     alerts->register_rule(std::make_unique<nm::ThresholdRule>("high_memory",     "memory",                    ">", 85.0,   5min, "warning"));
     alerts->register_rule(std::make_unique<nm::ThresholdRule>("bgp_loss",        "/bgp_peers",                "<", 1.0,    60s,  "critical", "cisco"));

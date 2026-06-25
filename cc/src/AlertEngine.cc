@@ -17,8 +17,8 @@
 namespace NodeMonitor
 {
 
-    AlertEngine::AlertEngine(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store)
-        : m_cache { cache }, m_store { store }
+    AlertEngine::AlertEngine(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<RunbookEngine> runbooks)
+        : m_cache { cache }, m_store { store }, m_runbooks { runbooks }
     {
 
     }
@@ -101,12 +101,13 @@ namespace NodeMonitor
 
         std::println("ALERT [{}] rule={} host={} {}", rule.severity(), rule.name(), hostname, description);
         m_alert_count.fetch_add(1uz);
-        if (m_store == nullptr) return;
 
         ::nlohmann::json details { };
         details["description"] = description;
         details["severity"] = rule.severity();
-        m_store->record_incident(rule.name(), hostname, rule.severity(), now, details);
+
+        if (m_store != nullptr) m_store->record_incident(rule.name(), hostname, rule.severity(), now, details);
+        if (m_runbooks != nullptr) m_runbooks->on_alert_fired(rule.name(), hostname, details);
 
     }
 

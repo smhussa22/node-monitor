@@ -4,6 +4,7 @@
 // related headers
 #include "MetricCache.hh"
 #include "MetricStore.hh"
+#include "RunbookEngine.hh"
 #include "Rule.hh"
 
 // c sys headers
@@ -32,7 +33,7 @@ namespace NodeMonitor
     public:
 
         AlertEngine() = delete;
-        AlertEngine(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store);
+        AlertEngine(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<RunbookEngine> runbooks = nullptr);
         ~AlertEngine() = default;
 
         AlertEngine(const AlertEngine&) = delete;
@@ -72,6 +73,7 @@ namespace NodeMonitor
 
         std::shared_ptr<MetricCache> m_cache { }; // source of "what is each host doing right now"
         std::shared_ptr<MetricStore> m_store { }; // optional postgres backend; null when persistence is off
+        std::shared_ptr<RunbookEngine> m_runbooks { }; // optional self-healing engine; null when runbooks are off
         std::vector<std::unique_ptr<Rule>> m_rules { }; // registered rule set
         std::unordered_map<std::string, ConditionTracker> m_holding { }; // key = rule_name + "|" + hostname
         mutable std::mutex m_mutex { }; // guards m_rules and m_holding from concurrent evaluate/register

@@ -11,6 +11,7 @@ kubectl delete -f k8s/simulator-juniper.yaml --ignore-not-found
 kubectl delete -f k8s/simulator-paloalto.yaml --ignore-not-found
 kubectl delete -f k8s/dashboard.yaml --ignore-not-found
 kubectl delete -f k8s/collector.yaml --ignore-not-found
+kubectl delete -f k8s/collector-rbac.yaml --ignore-not-found
 kubectl delete -f k8s/postgres.yaml --ignore-not-found
 
 # delete the cluster itself; this also removes the managed node group and detaches EBS volumes

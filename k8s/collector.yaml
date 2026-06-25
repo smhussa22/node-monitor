@@ -36,6 +36,7 @@ spec:
         app: collector
     spec:
       terminationGracePeriodSeconds: 15
+      serviceAccountName: collector
       containers:
         - name: collector
           image: node-monitor-collector:latest

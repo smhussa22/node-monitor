@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}actions · node-monitor{% endblock %}
+
+{% set status_class = {
+    'success':              'bg-success',
+    'failed':               'bg-danger',
+    'dry_run':              'bg-info text-dark',
+    'cooldown_suppressed':  'bg-secondary',
+    'rate_limited':         'bg-secondary',
+    'circuit_open':         'bg-warning text-dark',
+    'skipped':              'bg-secondary',
+} %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">remediation actions</h3>
+    <span class="badge bg-secondary">{{ actions | length }} in last {{ current_window }}</span>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">outcome breakdown</div>
+            <ul class="list-group list-group-flush">
+                {% for s in by_status %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span><span class="badge {{ status_class.get(s.status, 'bg-secondary') }} me-2">{{ s.status }}</span></span>
+                        <span class="badge bg-dark">{{ s.n }}</span>
+                    </li>
+                {% else %}
+                    <li class="list-group-item text-secondary">no actions taken yet</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header fw-semibold">per-runbook tally</div>
+            <table class="table table-sm mb-0">
+                <thead><tr><th>runbook</th><th>total</th><th>ok</th><th>fail</th><th>dry-run</th><th>suppressed</th></tr></thead>
+                <tbody>
+                {% for r in by_runbook %}
+                    <tr>
+                        <td>{{ r.runbook_name }}</td>
+                        <td>{{ r.total }}</td>
+                        <td class="text-success">{{ r.success }}</td>
+                        <td class="text-danger">{{ r.failed }}</td>
+                        <td class="text-info">{{ r.dry_run }}</td>
+                        <td class="text-secondary">{{ r.cooldown }}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="6" class="text-secondary text-center py-3">no runbooks have fired yet</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header fw-semibold">action audit log (last {{ current_window }})</div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>started</th><th>runbook</th><th>rule</th><th>host</th>
+                    <th>action</th><th>target</th><th>status</th><th>http</th><th>error</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for a in actions %}
+                <tr>
+                    <td class="small">{{ a.started_at }}</td>
+                    <td>{{ a.runbook_name }}</td>
+                    <td>{{ a.rule_name }}</td>
+                    <td><a href="/devices/{{ a.hostname }}">{{ a.hostname }}</a></td>
+                    <td><code>{{ a.action_type }}</code></td>
+                    <td class="small">{{ a.target }}</td>
+                    <td><span class="badge {{ status_class.get(a.status, 'bg-secondary') }}">{{ a.status }}</span></td>
+                    <td>{{ a.response_code if a.response_code else '' }}</td>
+                    <td class="small text-danger">{{ a.error_message or '' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="9" class="text-secondary text-center py-3">no remediation actions yet</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>setTimeout(() => location.reload(), 15000);</script>
+{% endblock %}
