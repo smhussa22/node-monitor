@@ -46,6 +46,26 @@ def template_globals() -> dict:
     }
 
 
+# ---- health endpoints ---------------------------------------------------------
+
+# cheap liveness probe — no DB query, just confirms the gunicorn worker is responsive
+@app.route("/healthz")
+def healthz() -> Response:
+
+    return jsonify({"ok": True})
+
+
+# readiness probe — confirms the DB connection pool can hand out a working connection
+@app.route("/readyz")
+def readyz() -> Response:
+
+    try:
+        query_one("SELECT 1 AS ok")
+        return jsonify({"ready": True})
+    except Exception as e:
+        return jsonify({"ready": False, "error": str(e)}), 503
+
+
 # ---- HTML pages ---------------------------------------------------------------
 
 @app.route("/")
@@ -81,11 +101,15 @@ def home() -> str:
         "GROUP BY rule_name, severity ORDER BY fired DESC LIMIT 5"
     )
 
-    # top-5 current CPU consumers across the latest sample per host
+    # top-5 current CPU consumers; scope to the last 5 minutes so the DISTINCT ON scan stays cheap as the metrics
+    # table grows. without this clause the query degrades linearly with corpus size — at 1k devices it's already slow
     top_cpu = query_all(
-        "WITH latest AS ("
+        "WITH recent AS ("
+        "  SELECT hostname, vendor, cpu, memory, ts FROM metrics "
+        "  WHERE ts > NOW() - INTERVAL '5 minutes'"
+        "), latest AS ("
         "  SELECT DISTINCT ON (hostname) hostname, vendor, cpu, memory, ts "
-        "  FROM metrics ORDER BY hostname, ts DESC"
+        "  FROM recent ORDER BY hostname, ts DESC"
         ") "
         "SELECT hostname, vendor, cpu, memory FROM latest "
         "ORDER BY cpu DESC LIMIT 5"
@@ -117,10 +141,14 @@ def devices() -> str:
     filter_str = request.args.get("filter")
     where_sql, params = parse_filter(filter_str, "metrics")
 
+    # window to last 15 minutes so DISTINCT ON doesn't scan the entire metrics table at any reasonable corpus size
     sql = (
-        "WITH latest AS ("
+        "WITH recent AS ("
+        "  SELECT hostname, vendor, cpu, memory, ts, payload FROM metrics "
+        "  WHERE ts > NOW() - INTERVAL '15 minutes'"
+        "), latest AS ("
         "  SELECT DISTINCT ON (hostname) hostname, vendor, cpu, memory, ts, payload "
-        "  FROM metrics ORDER BY hostname, ts DESC"
+        "  FROM recent ORDER BY hostname, ts DESC"
         ") "
         f"SELECT hostname, vendor, cpu, memory, ts AS last_seen, "
         "       payload->>'health_status' AS health_status "

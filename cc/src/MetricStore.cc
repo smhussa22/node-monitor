@@ -4,7 +4,10 @@
 // c sys headers
 
 // cpp stdlib headers
+#include <chrono>
 #include <print>
+#include <stdexcept>
+#include <thread>
 
 // 3rd party headers
 
@@ -17,9 +20,30 @@ namespace NodeMonitor
         : m_connection_string { connection_string }
     {
 
-        // open pool_size connections eagerly so we surface configuration errors at startup, not on first request
-        for (std::size_t i { 0 }; i < pool_size; ++i)
-            m_pool.push_back(std::make_unique<::pqxx::connection>(m_connection_string));
+        // open pool_size connections eagerly so we surface configuration errors at startup, not on first request.
+        // retry on early failures because in kubernetes the collector pod can race ahead of the postgres pod's
+        // readiness — without retry the runtime would silently run without persistence forever.
+        constexpr int max_attempts { 30 };
+        constexpr auto retry_delay { std::chrono::seconds { 2 } };
+        std::size_t opened { 0 };
+        for (int attempt { 1 }; attempt <= max_attempts && opened < pool_size; ++attempt)
+        {
+            try
+            {
+                while (opened < pool_size)
+                {
+                    m_pool.push_back(std::make_unique<::pqxx::connection>(m_connection_string));
+                    ++opened;
+                }
+            }
+            catch (const std::exception& e)
+            {
+                std::println("metric store connect attempt {}/{} failed: {} — retrying in {}s", attempt, max_attempts, e.what(), retry_delay.count());
+                std::this_thread::sleep_for(retry_delay);
+            }
+        }
+        if (opened < pool_size)
+            throw std::runtime_error { "metric store gave up after retry loop" };
         ensure_schema();
         std::println("metric store connected to postgres with pool size {}", pool_size);
 

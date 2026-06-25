@@ -4,3 +4,9 @@ CLAUDE.md
 __pycache__/
 .vscode/
 build/
+
+# aws credentials downloaded from the iam console
+*_accessKeys.csv
+*_credentials.csv
+.env
+.env.*

@@ -4,13 +4,9 @@ metadata:
   name: dashboard
   labels:
     app: dashboard
-  annotations:
-    # ask EKS to provision a network load balancer that uses pod ip target type and is internet-facing.
-    # this lets us share the dashboard URL without setting up the AWS Load Balancer Controller / Ingress.
-    service.beta.kubernetes.io/aws-load-balancer-type: external
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
 spec:
+  # plain LoadBalancer makes EKS provision a Classic ELB via the in-tree cloud controller. simpler than the
+  # nlb-with-ip-target annotations which require the AWS Load Balancer Controller (not installed by default).
   type: LoadBalancer
   selector:
     app: dashboard
@@ -72,15 +68,19 @@ spec:
             limits:
               cpu: "500m"
               memory: "256Mi"
+          # liveness hits the in-memory /healthz so a slow DB query never kills the gunicorn worker.
+          # readiness hits /readyz which does SELECT 1 — confirms postgres is reachable before traffic is sent.
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: 5000
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: 5000
             initialDelaySeconds: 30
             periodSeconds: 15
+            timeoutSeconds: 3
