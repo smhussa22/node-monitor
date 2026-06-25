@@ -4,13 +4,19 @@ metadata:
   name: dashboard
   labels:
     app: dashboard
+  annotations:
+    # ask EKS to provision a network load balancer that uses pod ip target type and is internet-facing.
+    # this lets us share the dashboard URL without setting up the AWS Load Balancer Controller / Ingress.
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: dashboard
   ports:
     - name: http
-      port: 5000
+      port: 80
       targetPort: 5000
       protocol: TCP
 ---
