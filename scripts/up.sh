@@ -51,9 +51,20 @@ else
     echo ">>> EKS cluster already exists, skipping create"
 fi
 
-# metrics-server is required for HPA cpu-target scaling but is not bundled with EKS
-echo ">>> installing metrics-server"
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+# metrics-server is required for HPA cpu-target scaling. EKS often has one pre-installed (or partially), and the
+# upstream manifest's selector is immutable so kubectl apply will fail to upgrade it. tolerate that case.
+echo ">>> installing metrics-server (errors are tolerated; we verify it's serving below)"
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml || true
+
+# wait until metrics-server is actually serving the metrics.k8s.io api; HPA needs this
+echo ">>> waiting for metrics-server to become healthy"
+for i in $(seq 1 24); do
+    if kubectl top nodes >/dev/null 2>&1; then
+        echo "metrics-server ready"
+        break
+    fi
+    sleep 5
+done
 
 # cluster-autoscaler scales nodes when pods are Pending; eksctl already attached the IAM policy to node role
 echo ">>> installing cluster-autoscaler"
