@@ -1,4 +1,5 @@
 // related headers
+#include "DhcpPacket.hh"
 #include "MetricStore.hh"
 
 // c sys headers
@@ -132,6 +133,40 @@ namespace NodeMonitor
         catch (const std::exception& e)
         {
             std::println("error: flow insert failed: {}", e.what());
+        }
+        release_connection(std::move(conn));
+
+    }
+
+    void MetricStore::record_dhcp_lease(const DhcpLease& lease)
+    {
+
+        auto conn { acquire_connection() };
+        try
+        {
+            ::pqxx::work tx { *conn };
+            tx.exec(
+                "INSERT INTO dhcp_leases (mac, ip, state, granted_at, expires_at, hostname) "
+                "VALUES ($1, $2, $3, to_timestamp($4), to_timestamp($5), $6)",
+                ::pqxx::params {
+                    mac_to_string(lease.m_mac),
+                    ipv4_to_dotted(lease.m_ip),
+                    to_string(lease.m_state),
+                    std::chrono::duration<double>(lease.m_granted_at.time_since_epoch()).count(),
+                    std::chrono::duration<double>(lease.m_expires_at.time_since_epoch()).count(),
+                    lease.m_hostname.empty() ? std::optional<std::string> { } : std::optional<std::string> { lease.m_hostname }
+                }
+            );
+            tx.commit();
+            m_insert_count.fetch_add(1uz);
+        }
+        catch (const ::pqxx::sql_error& e)
+        {
+            std::println("error: dhcp lease insert failed: {} (sql: {})", e.what(), e.query());
+        }
+        catch (const std::exception& e)
+        {
+            std::println("error: dhcp lease insert failed: {}", e.what());
         }
         release_connection(std::move(conn));
 
@@ -345,6 +380,21 @@ namespace NodeMonitor
             );
             tx.exec("CREATE INDEX IF NOT EXISTS idx_actions_runbook_host ON actions (runbook_name, hostname, started_at DESC)");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_actions_status ON actions (status, started_at DESC)");
+            tx.exec(
+                "CREATE TABLE IF NOT EXISTS dhcp_leases ("
+                "    id           BIGSERIAL    PRIMARY KEY,"
+                "    mac          TEXT         NOT NULL,"
+                "    ip           TEXT         NOT NULL,"
+                "    state        TEXT         NOT NULL,"
+                "    granted_at   TIMESTAMPTZ  NOT NULL,"
+                "    expires_at   TIMESTAMPTZ  NOT NULL,"
+                "    hostname     TEXT,"
+                "    recorded_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()"
+                ")"
+            );
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_dhcp_leases_recorded ON dhcp_leases (recorded_at DESC)");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_dhcp_leases_mac      ON dhcp_leases (mac, recorded_at DESC)");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_dhcp_leases_state    ON dhcp_leases (state, recorded_at DESC)");
             tx.commit();
         }
         catch (const std::exception& e)

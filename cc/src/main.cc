@@ -26,6 +26,9 @@
 #include "Action.hh"
 #include "AlertEngine.hh"
 #include "CollectorServer.hh"
+#include "DhcpPacket.hh"
+#include "DhcpPool.hh"
+#include "DhcpServer.hh"
 #include "K8sClient.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
@@ -87,6 +90,25 @@ int main()
 
     // construct the netflow receiver bound to the standard netflow v5/v9 port
     nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store, acl };
+
+    // construct the dhcp server with a /16 pool (~65k usable ips) and 1h leases. on kubernetes we run
+    // unicast — simulators are configured at deploy time with this server's clusterip — so we don't need
+    // an L2 broadcast domain. server identifier 10.42.0.1 doubles as the gateway in option 3, and our
+    // future DnsServer is announced as 10.42.0.2 via option 6
+    const std::uint32_t k_pool_network { (10u << 24) | (42u << 16) };          // 10.42.0.0
+    const std::uint32_t k_pool_gateway { k_pool_network | 1u };                // 10.42.0.1
+    const std::uint32_t k_pool_dns     { k_pool_network | 2u };                // 10.42.0.2
+    auto dhcp_pool { std::make_unique<nm::DhcpPool>(k_pool_network, 16u, k_pool_gateway, k_pool_dns, std::chrono::seconds { 3600 }) };
+
+    // dhcp server defaults to udp/67 (RFC 2131); allow override via env so local dev can avoid privileged
+    // ports without needing NET_BIND_SERVICE. the kubernetes deployment grants that capability
+    std::uint16_t dhcp_port { 67 };
+    if (const char* dp { std::getenv("DHCP_PORT") }; dp != nullptr)
+    {
+        try { dhcp_port = static_cast<std::uint16_t>(std::stoi(dp)); }
+        catch (...) { /* keep default */ }
+    }
+    nm::DhcpServer dhcp { dhcp_port, std::move(dhcp_pool), store, k_pool_gateway };
 
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };
@@ -186,11 +208,13 @@ int main()
     server.start();
     scheduler.start();
     netflow.start();
+    dhcp.start();
     std::println("node-monitor collector running on port 8000");
     std::this_thread::sleep_for(std::chrono::hours { 1 });
 
     // graceful shutdown in reverse start order
     scheduler.stop();
+    dhcp.stop();
     netflow.stop();
     server.stop();
     pool->shutdown();

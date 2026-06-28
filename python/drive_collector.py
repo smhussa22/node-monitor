@@ -6,6 +6,7 @@ import time
 from typing import List
 
 from simulators.cisco_router import CiscoRouterSimulator
+from simulators.dhcp_client import DhcpClient
 from simulators.juniper_srx import JuniperSRXSimulator
 from simulators.paloalto import PaloAltoSimulator
 
@@ -22,6 +23,8 @@ def main() -> None:
     parser.add_argument("--netflow-host", type=str, default="127.0.0.1", help="udp host for cisco netflow records")
     parser.add_argument("--netflow-port", type=int, default=2055, help="udp port for cisco netflow records")
     parser.add_argument("--hostname-prefix", type=str, default=os.environ.get("POD_NAME", os.environ.get("HOSTNAME", "local")), help="prefix added to each simulated hostname to keep them unique across pods")
+    parser.add_argument("--dhcp-server", type=str, default=os.environ.get("DHCP_SERVER", ""), help="dhcp server ip; when set, each simulator does a real DORA exchange before pushing metrics")
+    parser.add_argument("--dhcp-port", type=int, default=int(os.environ.get("DHCP_PORT", "67")), help="dhcp server udp port")
     args = parser.parse_args()
 
     # restrict the vendor pool when caller pinned to one type
@@ -32,21 +35,41 @@ def main() -> None:
     ]
     vendors = vendors_all if args.vendor == "all" else [v for v in vendors_all if v[0] == args.vendor]
 
-    # build the simulator pool, round-robin across whichever vendors are active
+    # build the simulator pool, round-robin across whichever vendors are active. when --dhcp-server is set,
+    # each simulator does a real DORA exchange before being constructed and runs a background renewal thread
     sims: List = []
+    dhcp_clients: List[DhcpClient] = []
     for i in range(args.count):
         vendor_name, host_prefix, cls = vendors[i % len(vendors)]
         hostname = f"{args.hostname_prefix}-{host_prefix}{i // len(vendors) + 1}"
-        if cls is CiscoRouterSimulator:
-            sims.append(cls(hostname=hostname, collector_url=args.collector, netflow_host=args.netflow_host, netflow_port=args.netflow_port, interval_sec=args.interval))
-        else:
-            sims.append(cls(hostname=hostname, collector_url=args.collector, interval_sec=args.interval))
 
-    # install a SIGINT handler so Ctrl+C and k8s SIGTERM stop every simulator cleanly
+        assigned_ip = None
+        if args.dhcp_server:
+            client = DhcpClient(hostname=hostname, server_ip=args.dhcp_server, server_port=args.dhcp_port)
+            try:
+                lease = client.acquire(timeout_sec=10.0)
+                client.start_renewal()
+                dhcp_clients.append(client)
+                assigned_ip = lease.ip
+                print(f"[dhcp] {hostname} bound {lease.ip} mask={lease.mask} gw={lease.gateway} lease={lease.lease_seconds}s")
+            except Exception as e:
+                print(f"[dhcp] {hostname} acquire failed: {e}; running without an assigned ip")
+
+        if cls is CiscoRouterSimulator:
+            sims.append(cls(hostname=hostname, collector_url=args.collector, netflow_host=args.netflow_host, netflow_port=args.netflow_port, interval_sec=args.interval, assigned_ip=assigned_ip))
+        else:
+            sims.append(cls(hostname=hostname, collector_url=args.collector, interval_sec=args.interval, assigned_ip=assigned_ip))
+
+    # install a SIGINT handler so Ctrl+C and k8s SIGTERM stop every simulator cleanly. RELEASE any dhcp
+    # leases on the way out so the server can reclaim ips immediately instead of waiting for expiry
     def shutdown(signum, frame) -> None:
         print(f"\nstopping {len(sims)} simulators...")
         for s in sims:
             s.stop()
+        for c in dhcp_clients:
+            try: c.release()
+            except Exception: pass
+            c.stop()
         sys.exit(0)
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
@@ -67,6 +90,10 @@ def main() -> None:
     print(f"stopping {len(sims)} simulators...")
     for s in sims:
         s.stop()
+    for c in dhcp_clients:
+        try: c.release()
+        except Exception: pass
+        c.stop()
 
 
 if __name__ == "__main__":

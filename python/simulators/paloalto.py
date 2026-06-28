@@ -22,16 +22,18 @@ class PaloAltoMetrics:
     security_events: List[dict]    # recent security event records
     health_status: str             # rolled-up device health: healthy, degraded, or down
     timestamp: float               # epoch seconds when the snapshot was generated
+    ip: Optional[str] = None       # ipv4 address acquired via dhcp; None when dhcp wasn't used
 
 
 # simulates a palo alto firewall that pushes security metrics to a collector
 class PaloAltoSimulator:
 
-    def __init__(self, hostname: str, collector_url: str, interval_sec: float = 30.0):
+    def __init__(self, hostname: str, collector_url: str, interval_sec: float = 30.0, assigned_ip: Optional[str] = None):
 
         self.hostname: str = hostname                       # name of the simulated firewall
         self.collector_url: str = collector_url             # http url where metrics are pushed
         self.interval_sec: float = interval_sec             # seconds between export cycles
+        self.assigned_ip: Optional[str] = assigned_ip       # ip acquired from dhcp; included in metric payload
         self.running: bool = False                          # whether the export loop is active
         self.thread: Optional[threading.Thread] = None      # background export thread
 
@@ -70,6 +72,7 @@ class PaloAltoSimulator:
             security_events=self._generate_security_events(),
             health_status=random.choices(["healthy", "degraded", "down"], weights=[0.85, 0.12, 0.03])[0],
             timestamp=time.time(),
+            ip=self.assigned_ip,
         )
 
         # post the snapshot to the http collector

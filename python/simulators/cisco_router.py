@@ -13,27 +13,29 @@ import requests
 @dataclass
 class CiscoRouterMetrics:
 
-    hostname: str           # name of the simulated router
-    vendor: str             # device vendor identifier; cisco
-    cpu: float              # cpu usage percentage
-    memory: float           # memory usage percentage
-    interface_stats: dict   # per-interface (connection point on router) byte and packet counters
-    ospf_neighbors: int     # count of active open shortest path first (ospf) neighbors
-    bgp_peers: int          # count of active border gateway protocol (bgp) peers
-    health_status: str      # rolled-up device health: healthy, degraded, or down
-    timestamp: float        # epoch seconds when the snapshot was generated
+    hostname: str                  # name of the simulated router
+    vendor: str                    # device vendor identifier; cisco
+    cpu: float                     # cpu usage percentage
+    memory: float                  # memory usage percentage
+    interface_stats: dict          # per-interface (connection point on router) byte and packet counters
+    ospf_neighbors: int            # count of active open shortest path first (ospf) neighbors
+    bgp_peers: int                 # count of active border gateway protocol (bgp) peers
+    health_status: str             # rolled-up device health: healthy, degraded, or down
+    timestamp: float               # epoch seconds when the snapshot was generated
+    ip: Optional[str] = None       # ipv4 address acquired via dhcp; None when dhcp wasn't used
 
 
 # simulates a cisco router that pushes metrics and netflow records to a collector
 class CiscoRouterSimulator:
 
-    def __init__(self, hostname: str, collector_url: str, netflow_host: str = "127.0.0.1", netflow_port: int = 2055, interval_sec: float = 30.0):
+    def __init__(self, hostname: str, collector_url: str, netflow_host: str = "127.0.0.1", netflow_port: int = 2055, interval_sec: float = 30.0, assigned_ip: Optional[str] = None):
 
         self.hostname: str = hostname                       # name of the simulated router
         self.collector_url: str = collector_url             # http url where metrics are pushed
         self.netflow_host: str = netflow_host               # host that receives netflow records over udp
         self.netflow_port: int = netflow_port               # udp port that receives netflow records
         self.interval_sec: float = interval_sec             # seconds between export cycles
+        self.assigned_ip: Optional[str] = assigned_ip       # ip acquired from dhcp; included in metric payload
         self.running: bool = False                          # whether the export loop is active
         self.thread: Optional[threading.Thread] = None      # background export thread
         self.netflow_socket: Optional[socket.socket] = None # udp socket used for netflow exports
@@ -73,6 +75,7 @@ class CiscoRouterSimulator:
             bgp_peers=random.randint(1, 3),
             health_status=random.choices(["healthy", "degraded", "down"], weights=[0.85, 0.12, 0.03])[0],
             timestamp=time.time(),
+            ip=self.assigned_ip,
         )
 
         # post the snapshot to the http collector

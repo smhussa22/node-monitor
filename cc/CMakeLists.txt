@@ -35,6 +35,10 @@ set(LIB_SOURCES
     src/Action.cc
     src/AlertEngine.cc
     src/CollectorServer.cc
+    src/DhcpLease.cc
+    src/DhcpPacket.cc
+    src/DhcpPool.cc
+    src/DhcpServer.cc
     src/K8sClient.cc
     src/MetricCache.cc
     src/MetricStore.cc

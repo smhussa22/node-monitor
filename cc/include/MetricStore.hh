@@ -3,6 +3,7 @@
 
 // related headers
 #include "AclEngine.hh"
+#include "DhcpLease.hh"
 #include "Metric.hh"
 
 // c sys headers
@@ -60,6 +61,11 @@ namespace NodeMonitor
         // append one parsed netflow record to the flows table with its acl verdict; missing optional fields
         // default cleanly. a verdict with m_rule_id == -1 writes NULL into the acl_rule_id column
         void persist_flow(const ::nlohmann::json& flow, const AclVerdict& verdict);
+
+        // append one dhcp lease state change to the dhcp_leases table; the table keeps history (one row
+        // per state transition) so the dashboard can chart DORA activity over time rather than just the
+        // current binding. callers don't have to dedupe; the table is append-only
+        void record_dhcp_lease(const DhcpLease& lease);
 
         // total rows ever persisted via this process (useful for smoke tests)
         std::uint64_t insert_count() const noexcept;

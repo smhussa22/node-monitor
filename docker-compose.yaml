@@ -59,6 +59,8 @@ services:
     image: node-monitor-simulator:latest
     depends_on:
       - collector
+    environment:
+      DHCP_SERVER: "collector"
     command:
       - "--vendor=cisco"
       - "--count=20"
@@ -73,6 +75,8 @@ services:
     image: node-monitor-simulator:latest
     depends_on:
       - collector
+    environment:
+      DHCP_SERVER: "collector"
     command:
       - "--vendor=juniper"
       - "--count=10"
@@ -85,6 +89,8 @@ services:
     image: node-monitor-simulator:latest
     depends_on:
       - collector
+    environment:
+      DHCP_SERVER: "collector"
     command:
       - "--vendor=paloalto"
       - "--count=10"
