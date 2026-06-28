@@ -2,6 +2,7 @@
 #define NODE_MONITOR_NETFLOW_RECEIVER_HH
 
 // related headers
+#include "AclEngine.hh"
 #include "MetricStore.hh"
 #include "SocketFd.hh"
 
@@ -30,7 +31,7 @@ namespace NodeMonitor
     public:
 
         NetflowReceiver() = delete;
-        NetflowReceiver(std::uint16_t port, std::shared_ptr<MetricStore> store);
+        NetflowReceiver(std::uint16_t port, std::shared_ptr<MetricStore> store, std::shared_ptr<AclEngine> acl = nullptr);
         ~NetflowReceiver();
 
         NetflowReceiver(const NetflowReceiver&) = delete;
@@ -70,6 +71,7 @@ namespace NodeMonitor
         std::unordered_map<std::string, std::uint64_t> m_per_host_flows { }; // per source hostname flow counts
         mutable std::mutex m_mutex { }; // protects the per host flow count map
         std::shared_ptr<MetricStore> m_store { }; // optional persistence sink for received flow records
+        std::shared_ptr<AclEngine> m_acl { }; // optional acl engine; when null every flow is treated as permit
 
     };
 

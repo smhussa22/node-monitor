@@ -2,6 +2,7 @@
 #define NODE_MONITOR_COLLECTOR_SERVER_HH
 
 // related headers
+#include "AclEngine.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
 #include "SocketFd.hh"
@@ -30,7 +31,7 @@ namespace NodeMonitor
     public:
 
         CollectorServer() = delete;
-        CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port);
+        CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl = nullptr);
         ~CollectorServer();
 
         CollectorServer(const CollectorServer&) = delete;
@@ -56,12 +57,16 @@ namespace NodeMonitor
         // body of the accept thread; waits for connections and dispatches work
         void accept_loop();
 
-        // parse an incoming http request and update the metric cache
-        void handle_request(const std::string& raw_request);
+        // dispatch one raw http request and return the full http response (status line + headers + body)
+        std::string handle_request(const std::string& raw_request);
+
+        // build a json snapshot of the acl engine's rules and totals; used by GET /acl/rules
+        std::string acl_snapshot_json() const;
 
         std::shared_ptr<MetricCache> m_cache { }; // shared cache for storing incoming metrics
         std::shared_ptr<MetricStore> m_store { }; // optional postgres-backed persistent store; null when disabled
         std::shared_ptr<ThreadPool> m_pool { }; // worker pool used to process requests off the accept thread
+        std::shared_ptr<AclEngine> m_acl { }; // optional acl engine; exposed via GET /acl/rules
         std::uint16_t m_port { 0 }; // tcp port the server listens on
         SocketFd m_listen_socket { }; // raii owned listening socket file descriptor
         std::thread m_accept_thread { }; // thread that accepts new connections

@@ -5,6 +5,8 @@
 
 // cpp stdlib headers
 #include <chrono>
+#include <cstdint>
+#include <optional>
 #include <print>
 #include <stdexcept>
 #include <thread>
@@ -92,16 +94,21 @@ namespace NodeMonitor
 
     }
 
-    void MetricStore::persist_flow(const ::nlohmann::json& flow)
+    void MetricStore::persist_flow(const ::nlohmann::json& flow, const AclVerdict& verdict)
     {
+
+        // an implicit-deny verdict (m_rule_id == -1) is persisted with acl_rule_id = NULL so the dashboard
+        // can distinguish "matched the explicit deny rule N" from "fell through to implicit deny"
+        std::optional<std::int32_t> rule_id_opt { };
+        if (verdict.m_rule_id >= 0) rule_id_opt = verdict.m_rule_id;
 
         auto conn { acquire_connection() };
         try
         {
             ::pqxx::work tx { *conn };
             tx.exec(
-                "INSERT INTO flows (src_ip, dst_ip, src_port, dst_port, protocol, bytes, duration, hostname) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                "INSERT INTO flows (src_ip, dst_ip, src_port, dst_port, protocol, bytes, duration, hostname, acl_action, acl_rule_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
                 ::pqxx::params {
                     flow.value("src_ip", std::string { }),
                     flow.value("dst_ip", std::string { }),
@@ -110,7 +117,9 @@ namespace NodeMonitor
                     flow.value("protocol", std::string { }),
                     flow.value("bytes", std::int64_t { 0 }),
                     flow.value("duration", 0),
-                    flow.value("hostname", std::string { })
+                    flow.value("hostname", std::string { }),
+                    to_string(verdict.m_action),
+                    rule_id_opt
                 }
             );
             tx.commit();
@@ -306,13 +315,19 @@ namespace NodeMonitor
                 "    bytes        BIGINT       NOT NULL,"
                 "    duration     INTEGER,"
                 "    hostname     TEXT         NOT NULL,"
-                "    received_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()"
+                "    received_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),"
+                "    acl_action   TEXT,"
+                "    acl_rule_id  INTEGER"
                 ")"
             );
+            // additive alters so existing clusters pick up the acl columns without a drop-create cycle
+            tx.exec("ALTER TABLE flows ADD COLUMN IF NOT EXISTS acl_action TEXT");
+            tx.exec("ALTER TABLE flows ADD COLUMN IF NOT EXISTS acl_rule_id INTEGER");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_received_at ON flows (received_at DESC)");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_dst_port    ON flows (dst_port)");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_src_dst     ON flows (src_ip, dst_ip)");
             tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_hostname    ON flows (hostname)");
+            tx.exec("CREATE INDEX IF NOT EXISTS idx_flows_acl_action  ON flows (acl_action, received_at DESC)");
             tx.exec(
                 "CREATE TABLE IF NOT EXISTS actions ("
                 "    id            BIGSERIAL    PRIMARY KEY,"

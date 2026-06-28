@@ -2,6 +2,7 @@
 #define NODE_MONITOR_METRIC_STORE_HH
 
 // related headers
+#include "AclEngine.hh"
 #include "Metric.hh"
 
 // c sys headers
@@ -56,8 +57,9 @@ namespace NodeMonitor
         // append an audit row to the actions table; used by the runbook engine on every action attempt
         void record_action(const std::string& runbook_name, const std::string& rule_name, const std::string& hostname, const std::string& action_type, const std::string& target, const std::string& status, std::chrono::system_clock::time_point started_at, std::chrono::system_clock::time_point completed_at, const std::string& error_message, int response_code);
 
-        // append one parsed netflow record to the flows table; missing optional fields default cleanly
-        void persist_flow(const ::nlohmann::json& flow);
+        // append one parsed netflow record to the flows table with its acl verdict; missing optional fields
+        // default cleanly. a verdict with m_rule_id == -1 writes NULL into the acl_rule_id column
+        void persist_flow(const ::nlohmann::json& flow, const AclVerdict& verdict);
 
         // total rows ever persisted via this process (useful for smoke tests)
         std::uint64_t insert_count() const noexcept;

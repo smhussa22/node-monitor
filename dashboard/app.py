@@ -1,12 +1,30 @@
 import json
+import os
 import time
 from collections import deque
 from typing import Any
+from urllib.request import urlopen
+from urllib.error import URLError
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context
 
 from db import query_all, query_one
 from filters import parse_filter, window_interval
+
+
+# url of the c++ collector's http endpoint; same in docker-compose and k8s because the service is named "collector"
+COLLECTOR_URL = os.environ.get("COLLECTOR_URL", "http://collector:8000")
+
+
+# fetch the live acl rule snapshot from the collector; returns a stable empty payload when the collector
+# is unreachable so the dashboard renders cleanly during cold start instead of 500'ing
+def fetch_acl_snapshot() -> dict:
+
+    try:
+        with urlopen(f"{COLLECTOR_URL}/acl/rules", timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (URLError, OSError, ValueError):
+        return {"totals": {"evaluations": 0, "permits": 0, "denies": 0, "implicit_denies": 0}, "rules": []}
 
 
 app = Flask(__name__)
@@ -322,6 +340,82 @@ def actions() -> str:
     return render_template("actions.html", actions=rows, by_status=by_status, by_runbook=by_runbook)
 
 
+@app.route("/blocked-traffic")
+def blocked_traffic() -> str:
+
+    window = current_window()
+    interval = window_interval(window)
+
+    # live acl rule definitions + per-rule hit counts come from the collector's in-memory engine
+    acl = fetch_acl_snapshot()
+
+    # top denied src->dst pairs in the chosen window, straight from the flows table
+    top_denied = query_all(
+        "SELECT src_ip, dst_ip, dst_port, protocol, COUNT(*) AS flows, SUM(bytes) AS total_bytes "
+        "FROM flows "
+        f"WHERE received_at > NOW() - INTERVAL '{interval}' AND acl_action = 'deny' "
+        "GROUP BY src_ip, dst_ip, dst_port, protocol "
+        "ORDER BY flows DESC LIMIT 15"
+    )
+
+    # denied flow counts grouped by the rule that matched; NULL acl_rule_id means implicit deny
+    denied_by_rule = query_all(
+        "SELECT acl_rule_id, COUNT(*) AS flows "
+        "FROM flows "
+        f"WHERE received_at > NOW() - INTERVAL '{interval}' AND acl_action = 'deny' "
+        "GROUP BY acl_rule_id ORDER BY flows DESC"
+    )
+
+    # action mix for the donut: permits vs explicit denies vs implicit denies (NULL rule id)
+    mix = query_all(
+        "SELECT acl_action, "
+        "       COUNT(*) FILTER (WHERE acl_rule_id IS NULL) AS implicit, "
+        "       COUNT(*) FILTER (WHERE acl_rule_id IS NOT NULL) AS explicit "
+        "FROM flows "
+        f"WHERE received_at > NOW() - INTERVAL '{interval}' AND acl_action IS NOT NULL "
+        "GROUP BY acl_action"
+    )
+
+    # build a {rule_id -> description} map so we can label denied_by_rule rows nicely
+    rule_labels = {r["id"]: r["description"] for r in acl.get("rules", [])}
+    denied_rows = []
+    for r in denied_by_rule:
+        rid = r.get("acl_rule_id")
+        denied_rows.append({
+            "rule_id": rid,
+            "label": rule_labels.get(rid, "implicit deny") if rid is not None else "implicit deny",
+            "flows": int(r["flows"]),
+        })
+
+    # turn the mix rows into a single object the chart can consume
+    permit_count = 0
+    explicit_deny_count = 0
+    implicit_deny_count = 0
+    for row in mix:
+        if row["acl_action"] == "permit":
+            permit_count = int(row["explicit"] or 0) + int(row["implicit"] or 0)
+        elif row["acl_action"] == "deny":
+            explicit_deny_count = int(row["explicit"] or 0)
+            implicit_deny_count = int(row["implicit"] or 0)
+
+    mix_json = json.dumps({
+        "permit": permit_count,
+        "explicit_deny": explicit_deny_count,
+        "implicit_deny": implicit_deny_count,
+    })
+
+    return render_template(
+        "blocked_traffic.html",
+        acl=acl,
+        top_denied=top_denied,
+        denied_rows=denied_rows,
+        mix_json=mix_json,
+        permit_count=permit_count,
+        explicit_deny_count=explicit_deny_count,
+        implicit_deny_count=implicit_deny_count,
+    )
+
+
 @app.route("/netflow")
 def netflow() -> str:
 
@@ -369,6 +463,12 @@ def netflow() -> str:
 
 
 # ---- JSON API -----------------------------------------------------------------
+
+@app.route("/api/acl/rules")
+def api_acl_rules() -> Response:
+
+    return jsonify(fetch_acl_snapshot())
+
 
 @app.route("/api/summary")
 def api_summary() -> Response:

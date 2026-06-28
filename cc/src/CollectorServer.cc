@@ -10,7 +10,9 @@
 
 // cpp stdlib headers
 #include <cstring>
+#include <format>
 #include <print>
+#include <string>
 
 // 3rd party headers
 #include <nlohmann/json.hpp>
@@ -21,8 +23,8 @@
 namespace NodeMonitor
 {
 
-    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port)
-        : m_cache { cache }, m_store { store }, m_pool { pool }, m_port { port }
+    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl)
+        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_port { port }
     {
 
     }
@@ -159,11 +161,9 @@ namespace NodeMonitor
                     if (body_start != std::string::npos && request.size() >= body_start + content_length) break;
                 }
 
-                if (!request.empty()) handle_request(request);
-
-                // send a minimal http 200 response so requests.post() returns cleanly on the python side
-                const char* response { "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" };
-                ::write(client_fd, response, ::strlen(response));
+                // build the full http response (the dispatcher decides what to put in the body) and write it back
+                std::string response { request.empty() ? std::string { "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" } : handle_request(request) };
+                ::write(client_fd, response.data(), response.size());
                 ::close(client_fd);
 
             });
@@ -172,22 +172,48 @@ namespace NodeMonitor
 
     }
 
-    void CollectorServer::handle_request(const std::string& raw_request)
+    // small helper for building a complete http response with proper content-length
+    namespace
     {
 
-        // skip http headers and isolate the json body
-        auto header_end { raw_request.find("\r\n\r\n") };
-        if (header_end == std::string::npos) return;
-        std::string body { raw_request.substr(header_end + 4) };
-        if (body.empty()) return;
+        std::string build_response(int status_code, const std::string& reason, const std::string& content_type, const std::string& body)
+        {
 
-        // parse the json body and build a Metric snapshot for the cache
+            return std::format("HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", status_code, reason, content_type, body.size(), body);
+
+        }
+
+    }
+
+    std::string CollectorServer::handle_request(const std::string& raw_request)
+    {
+
+        // parse the request line so we can dispatch by method and path
+        auto first_line_end { raw_request.find("\r\n") };
+        std::string request_line { raw_request.substr(0, first_line_end == std::string::npos ? raw_request.size() : first_line_end) };
+        auto sp1 { request_line.find(' ') };
+        auto sp2 { sp1 == std::string::npos ? std::string::npos : request_line.find(' ', sp1 + 1) };
+        std::string method { sp1 == std::string::npos ? std::string { } : request_line.substr(0, sp1) };
+        std::string path { (sp1 == std::string::npos || sp2 == std::string::npos) ? std::string { } : request_line.substr(sp1 + 1, sp2 - sp1 - 1) };
+
+        // GET /acl/rules returns a json snapshot of the acl engine
+        if (method == "GET" && path == "/acl/rules") return build_response(200, "OK", "application/json", acl_snapshot_json());
+
+        // GET /healthz is a cheap liveness probe; no db touch, no acl touch
+        if (method == "GET" && path == "/healthz") return build_response(200, "OK", "application/json", "{\"ok\":true}");
+
+        // everything else is treated as the legacy metric push path; isolate the body and feed the cache
+        auto header_end { raw_request.find("\r\n\r\n") };
+        if (header_end == std::string::npos) return build_response(200, "OK", "text/plain", "");
+        std::string body { raw_request.substr(header_end + 4) };
+        if (body.empty()) return build_response(200, "OK", "text/plain", "");
+
         try
         {
             // declare-then-assign avoids nlohmann's initializer_list ctor wrapping a single value in an array
             ::nlohmann::json parsed { };
             parsed = ::nlohmann::json::parse(body);
-            if (!parsed.is_object()) return;
+            if (!parsed.is_object()) return build_response(400, "Bad Request", "text/plain", "expected json object");
             Metric metric { };
             metric.m_hostname = parsed.value("hostname", std::string { });
             metric.m_vendor = parsed.value("vendor", std::string { });
@@ -201,7 +227,42 @@ namespace NodeMonitor
         catch (const ::nlohmann::json::exception& e)
         {
             std::println("error: failed to parse json: {}", e.what());
+            return build_response(400, "Bad Request", "text/plain", "invalid json");
         }
+
+        return build_response(200, "OK", "text/plain", "");
+
+    }
+
+    std::string CollectorServer::acl_snapshot_json() const
+    {
+
+        // when no engine is wired, return a well-formed empty payload so the dashboard can render an empty state
+        if (!m_acl) return std::string { "{\"totals\":{\"evaluations\":0,\"permits\":0,\"denies\":0,\"implicit_denies\":0},\"rules\":[]}" };
+
+        ::nlohmann::json out { };
+        out["totals"]["evaluations"] = m_acl->total_evaluations();
+        out["totals"]["permits"] = m_acl->total_permits();
+        out["totals"]["denies"] = m_acl->total_denies();
+        out["totals"]["implicit_denies"] = m_acl->implicit_denies();
+
+        ::nlohmann::json rules_arr { ::nlohmann::json::array() };
+        for (const auto& rule : m_acl->snapshot())
+        {
+            ::nlohmann::json r { };
+            r["id"] = rule.m_id;
+            r["action"] = rule.m_action;
+            r["protocol"] = rule.m_protocol;
+            r["src_cidr"] = rule.m_src_cidr;
+            r["dst_cidr"] = rule.m_dst_cidr;
+            r["src_ports"] = rule.m_src_ports;
+            r["dst_ports"] = rule.m_dst_ports;
+            r["description"] = rule.m_description;
+            r["hits"] = rule.m_hits;
+            rules_arr.push_back(r);
+        }
+        out["rules"] = rules_arr;
+        return out.dump();
 
     }
 

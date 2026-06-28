@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}blocked · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">evaluations</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(acl.totals.evaluations or 0) }}</div>
+                <div class="text-secondary small">since collector start</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">permits</div>
+                <div class="display-6 fw-bold text-success">{{ "{:,}".format(acl.totals.permits or 0) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">denies</div>
+                <div class="display-6 fw-bold text-danger">{{ "{:,}".format(acl.totals.denies or 0) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">implicit deny</div>
+                <div class="display-6 fw-bold text-warning">{{ "{:,}".format(acl.totals.implicit_denies or 0) }}</div>
+                <div class="text-secondary small">fell through every rule</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-5">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">action mix <span class="text-secondary small">(window: {{ current_window }})</span></div>
+            <div class="card-body">
+                <canvas id="acl-mix-chart" height="180"></canvas>
+                <div class="small text-secondary mt-3">
+                    permit {{ "{:,}".format(permit_count) }} ·
+                    explicit deny {{ "{:,}".format(explicit_deny_count) }} ·
+                    implicit deny {{ "{:,}".format(implicit_deny_count) }}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">denies by rule <span class="text-secondary small">(window: {{ current_window }})</span></div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>rule</th><th>label</th><th class="text-end">flows</th></tr></thead>
+                    <tbody>
+                    {% for r in denied_rows %}
+                        <tr>
+                            <td>{% if r.rule_id is none %}<span class="badge bg-warning text-dark">implicit</span>{% else %}<code>#{{ r.rule_id }}</code>{% endif %}</td>
+                            <td>{{ r.label }}</td>
+                            <td class="text-end">{{ "{:,}".format(r.flows) }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="3" class="text-secondary text-center py-3">no denied flows in this window</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">top denied talkers <span class="text-secondary small">(window: {{ current_window }})</span></div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>src</th><th>dst</th><th>dst port</th><th>proto</th><th class="text-end">flows</th><th class="text-end">bytes</th></tr></thead>
+                    <tbody>
+                    {% for t in top_denied %}
+                        <tr>
+                            <td><code>{{ t.src_ip }}</code></td>
+                            <td><code>{{ t.dst_ip }}</code></td>
+                            <td><span class="fw-bold">{{ t.dst_port }}</span></td>
+                            <td>{{ t.protocol }}</td>
+                            <td class="text-end">{{ "{:,}".format(t.flows) }}</td>
+                            <td class="text-end">{{ "{:,}".format(t.total_bytes or 0) }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6" class="text-secondary text-center py-3">no denied flows in this window</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">registered acl rules <span class="text-secondary small">(live from collector)</span></div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>#</th><th>action</th><th>proto</th><th>src cidr</th><th>dst cidr</th><th>src ports</th><th>dst ports</th><th>description</th><th class="text-end">hits</th></tr></thead>
+                    <tbody>
+                    {% for r in acl.rules %}
+                        <tr>
+                            <td><code>{{ r.id }}</code></td>
+                            <td>
+                                {% if r.action == 'permit' %}
+                                    <span class="badge bg-success">permit</span>
+                                {% else %}
+                                    <span class="badge bg-danger">deny</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ r.protocol }}</td>
+                            <td><code>{{ r.src_cidr }}</code></td>
+                            <td><code>{{ r.dst_cidr }}</code></td>
+                            <td>{{ r.src_ports }}</td>
+                            <td>{{ r.dst_ports }}</td>
+                            <td>{{ r.description }}</td>
+                            <td class="text-end">{{ "{:,}".format(r.hits or 0) }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="9" class="text-secondary text-center py-3">no acl rules loaded — is the collector running?</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const mix = {{ mix_json | safe }};
+        const ctx = document.getElementById("acl-mix-chart").getContext("2d");
+        new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["permit", "explicit deny", "implicit deny"],
+                datasets: [{
+                    data: [mix.permit, mix.explicit_deny, mix.implicit_deny],
+                    backgroundColor: ["#198754", "#dc3545", "#ffc107"],
+                }],
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: "bottom" } },
+            },
+        });
+    })();
+</script>
+{% endblock %}

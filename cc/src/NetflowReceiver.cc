@@ -20,8 +20,8 @@
 namespace NodeMonitor
 {
 
-    NetflowReceiver::NetflowReceiver(std::uint16_t port, std::shared_ptr<MetricStore> store)
-        : m_port { port }, m_store { std::move(store) }
+    NetflowReceiver::NetflowReceiver(std::uint16_t port, std::shared_ptr<MetricStore> store, std::shared_ptr<AclEngine> acl)
+        : m_port { port }, m_store { std::move(store) }, m_acl { std::move(acl) }
     {
 
     }
@@ -150,11 +150,22 @@ namespace NodeMonitor
                     unique_hosts = m_per_host_flows.size();
                 }
 
-                // heartbeat every 100 flows so the log does not get spammed
-                if (total % 100uz == 0uz) std::println("[netflow] total={} unique_hosts={}", total, unique_hosts);
+                // evaluate against the acl engine when one is wired; when absent (e.g. local dev) treat
+                // every flow as permit with no matched rule so persistence still tags the column
+                AclVerdict verdict { m_acl ? m_acl->evaluate(parsed) : AclVerdict { AclAction::Permit, -1 } };
 
-                // persist the flow record alongside the in-memory counter so the dashboard can query it later
-                if (m_store) m_store->persist_flow(parsed);
+                // heartbeat every 100 flows so the log does not get spammed; surface the acl verdict mix
+                // so an operator can see at a glance how many flows are being denied
+                if (total % 100uz == 0uz)
+                {
+                    std::uint64_t permits { m_acl ? m_acl->total_permits() : 0uz };
+                    std::uint64_t denies { m_acl ? m_acl->total_denies() : 0uz };
+                    std::uint64_t implicit { m_acl ? m_acl->implicit_denies() : 0uz };
+                    std::println("[netflow] total={} unique_hosts={} acl_permit={} acl_deny={} acl_implicit={}", total, unique_hosts, permits, denies, implicit);
+                }
+
+                // persist the flow record alongside the verdict so the dashboard can show blocked traffic
+                if (m_store) m_store->persist_flow(parsed, verdict);
             }
             catch (const ::nlohmann::json::exception& e)
             {

@@ -20,6 +20,9 @@
 // 3rd party headers
 
 // project headers
+#include "AclEngine.hh"
+#include "AclRateRule.hh"
+#include "AclRule.hh"
 #include "Action.hh"
 #include "AlertEngine.hh"
 #include "CollectorServer.hh"
@@ -65,11 +68,25 @@ int main()
         }
     }
 
-    // construct the collector server bound to a default port
-    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 } };
+    // construct the acl engine and register a baseline rule set; the cisco simulator emits flows with src
+    // in 10.0.0.0/24 and dst in 8.8.0.0/16 with a mix of well-known + ephemeral dst ports, so the rules
+    // below produce a healthy permit/deny split that the dashboard can chart
+    auto acl { std::make_shared<nm::AclEngine>() };
+    acl->register_rule(std::make_unique<nm::AclRule>(1u,  nm::AclAction::Permit, nm::AclProtocol::Tcp,  nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("443"),  "permit https outbound"));
+    acl->register_rule(std::make_unique<nm::AclRule>(2u,  nm::AclAction::Permit, nm::AclProtocol::Tcp,  nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("80"),   "permit http outbound"));
+    acl->register_rule(std::make_unique<nm::AclRule>(3u,  nm::AclAction::Permit, nm::AclProtocol::Udp,  nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("53"),   "permit dns"));
+    acl->register_rule(std::make_unique<nm::AclRule>(4u,  nm::AclAction::Permit, nm::AclProtocol::Tcp,  nm::parse_cidr("10.0.0.0/8"),  nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("22"),   "permit ssh from internal"));
+    acl->register_rule(std::make_unique<nm::AclRule>(5u,  nm::AclAction::Deny,   nm::AclProtocol::Tcp,  nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("22"),   "deny ssh from non-internal"));
+    acl->register_rule(std::make_unique<nm::AclRule>(6u,  nm::AclAction::Deny,   nm::AclProtocol::Tcp,  nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("3389"), "deny rdp"));
+    acl->register_rule(std::make_unique<nm::AclRule>(7u,  nm::AclAction::Deny,   nm::AclProtocol::Tcp,  nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("23"),   "deny telnet"));
+    acl->register_rule(std::make_unique<nm::AclRule>(8u,  nm::AclAction::Deny,   nm::AclProtocol::Icmp, nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("any"),  "deny icmp"));
+
+    // construct the collector server bound to a default port; acl is shared with the netflow receiver so
+    // GET /acl/rules returns the same engine state that decides flow verdicts
+    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl };
 
     // construct the netflow receiver bound to the standard netflow v5/v9 port
-    nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store };
+    nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store, acl };
 
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };
@@ -147,6 +164,10 @@ int main()
     alerts->register_rule(std::make_unique<nm::RateOfChangeRule>("cpu_spike",      "cpu",     40.0, 30s, "warning"));
     alerts->register_rule(std::make_unique<nm::RateOfChangeRule>("memory_jump",    "memory",  25.0, 60s, "info"));
     alerts->register_rule(std::make_unique<nm::FlappingRule>(   "health_flapping", 3u, 5min, "warning"));
+
+    // security signal: fires when the acl engine is denying flows above a sustained rate; sampled between
+    // ticks of the alert engine (10s cadence) so the threshold is denies-per-second, not denies-per-tick
+    alerts->register_rule(std::make_unique<nm::AclRateRule>("acl_deny_storm", 50.0, 30s, "warning", acl));
 
     // schedule a periodic snapshot of the cache and print one line per device
     scheduler.schedule([cache]

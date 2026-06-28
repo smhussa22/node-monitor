@@ -29,6 +29,9 @@ include_directories(include)
 find_package(CURL REQUIRED)
 
 set(LIB_SOURCES
+    src/AclEngine.cc
+    src/AclRateRule.cc
+    src/AclRule.cc
     src/Action.cc
     src/AlertEngine.cc
     src/CollectorServer.cc
@@ -48,3 +51,8 @@ target_link_libraries(node_monitor_lib PUBLIC nlohmann_json::nlohmann_json libpq
 
 add_executable(node_monitor src/main.cc)
 target_link_libraries(node_monitor PRIVATE node_monitor_lib)
+
+# acl_bench is a standalone microbenchmark for the AclEngine evaluate path; kept off the default build target
+# so the runtime image stays small. build it explicitly with:  cmake --build build --target acl_bench
+add_executable(acl_bench EXCLUDE_FROM_ALL bench/acl_bench.cc)
+target_link_libraries(acl_bench PRIVATE node_monitor_lib)
