@@ -40,6 +40,9 @@ set(LIB_SOURCES
     src/DhcpPacket.cc
     src/DhcpPool.cc
     src/DhcpServer.cc
+    src/DnsPacket.cc
+    src/DnsServer.cc
+    src/DnsZone.cc
     src/K8sClient.cc
     src/MetricCache.cc
     src/MetricStore.cc

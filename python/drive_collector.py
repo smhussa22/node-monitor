@@ -3,10 +3,11 @@ import os
 import signal
 import sys
 import time
-from typing import List
+from typing import List, Optional
 
 from simulators.cisco_router import CiscoRouterSimulator
 from simulators.dhcp_client import DhcpClient
+from simulators.dns_client import DnsClient
 from simulators.juniper_srx import JuniperSRXSimulator
 from simulators.paloalto import PaloAltoSimulator
 
@@ -25,7 +26,14 @@ def main() -> None:
     parser.add_argument("--hostname-prefix", type=str, default=os.environ.get("POD_NAME", os.environ.get("HOSTNAME", "local")), help="prefix added to each simulated hostname to keep them unique across pods")
     parser.add_argument("--dhcp-server", type=str, default=os.environ.get("DHCP_SERVER", ""), help="dhcp server ip; when set, each simulator does a real DORA exchange before pushing metrics")
     parser.add_argument("--dhcp-port", type=int, default=int(os.environ.get("DHCP_PORT", "67")), help="dhcp server udp port")
+    parser.add_argument("--dns-server", type=str, default=os.environ.get("DNS_SERVER", ""), help="dns server ip; when set, each simulator does live A + PTR lookups against our c++ DnsServer after DORA")
+    parser.add_argument("--dns-port", type=int, default=int(os.environ.get("DNS_PORT", "53")), help="dns server udp port")
+    parser.add_argument("--dns-zone", type=str, default=os.environ.get("DNS_ZONE", "node-monitor.local"), help="zone suffix used for DNS lookups")
     args = parser.parse_args()
+
+    # build the DNS client once and reuse it across simulators; resolve_a / resolve_ptr are stateless
+    # so a single client serves the whole pool. None when --dns-server isn't configured
+    dns: 'Optional[DnsClient]' = DnsClient(server_ip=args.dns_server, server_port=args.dns_port) if args.dns_server else None
 
     # restrict the vendor pool when caller pinned to one type
     vendors_all = [
@@ -54,6 +62,17 @@ def main() -> None:
                 print(f"[dhcp] {hostname} bound {lease.ip} mask={lease.mask} gw={lease.gateway} lease={lease.lease_seconds}s")
             except Exception as e:
                 print(f"[dhcp] {hostname} acquire failed: {e}; running without an assigned ip")
+
+        # if DNS is configured, exercise the c++ DnsServer with two real queries that prove the dhcp->dns
+        # auto-binding works: our own hostname should resolve to the ip dhcp just handed us, and the
+        # static "collector" entry should resolve to the configured gateway. silent on failure so a
+        # transient dns blip doesn't cascade to simulator startup
+        if dns is not None and assigned_ip is not None:
+            own_fqdn = f"{hostname}.{args.dns_zone}"
+            resolved_self = dns.resolve_a(own_fqdn)
+            resolved_collector = dns.resolve_a(f"collector.{args.dns_zone}")
+            if resolved_self or resolved_collector:
+                print(f"[dns] {hostname} resolved self={resolved_self} collector={resolved_collector}")
 
         if cls is CiscoRouterSimulator:
             sims.append(cls(hostname=hostname, collector_url=args.collector, netflow_host=args.netflow_host, netflow_port=args.netflow_port, interval_sec=args.interval, assigned_ip=assigned_ip))

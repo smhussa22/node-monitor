@@ -61,6 +61,7 @@ services:
       - collector
     environment:
       DHCP_SERVER: "collector"
+      DNS_SERVER: "collector"
     command:
       - "--vendor=cisco"
       - "--count=20"
@@ -77,6 +78,7 @@ services:
       - collector
     environment:
       DHCP_SERVER: "collector"
+      DNS_SERVER: "collector"
     command:
       - "--vendor=juniper"
       - "--count=10"
@@ -91,6 +93,7 @@ services:
       - collector
     environment:
       DHCP_SERVER: "collector"
+      DNS_SERVER: "collector"
     command:
       - "--vendor=paloalto"
       - "--count=10"

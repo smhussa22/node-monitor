@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}dns · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">queries</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(queries) }}</div>
+                <div class="text-secondary small">since collector start · zone {{ snapshot.zone or "(unset)" }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">noerror</div>
+                <div class="display-6 fw-bold text-success">{{ "{:,}".format(noerror) }}</div>
+                <div class="text-secondary small">answered with a record</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">nxdomain</div>
+                <div class="display-6 fw-bold text-warning">{{ "{:,}".format(nxdomain) }}</div>
+                <div class="text-secondary small">name unknown (in our zone)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">refused</div>
+                <div class="display-6 fw-bold text-danger">{{ "{:,}".format(refused) }}</div>
+                <div class="text-secondary small">name outside our zone</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-5">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">response code mix</div>
+            <div class="card-body">
+                <canvas id="rcode-chart" height="180"></canvas>
+                <div class="small text-secondary mt-3">
+                    notimpl {{ "{:,}".format(notimpl) }} · formerr {{ "{:,}".format(formerr) }}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">entries by source</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>source</th><th class="text-end">entries</th></tr></thead>
+                    <tbody>
+                    {% for src, n in by_source.items() %}
+                        <tr>
+                            <td>
+                                {% if src == 'dhcp' %}<span class="badge bg-success">dhcp</span>
+                                {% elif src == 'static' %}<span class="badge bg-secondary">static</span>
+                                {% else %}<span class="badge bg-info text-dark">{{ src }}</span>{% endif %}
+                            </td>
+                            <td class="text-end">{{ "{:,}".format(n) }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="2" class="text-secondary text-center py-3">zone is empty — start the collector and a simulator</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">zone entries <span class="text-secondary small">(live from collector)</span></div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>fqdn</th><th>ip</th><th>source</th></tr></thead>
+                    <tbody>
+                    {% for e in entries %}
+                        <tr>
+                            <td><code>{{ e.fqdn }}</code></td>
+                            <td><code>{{ e.ip }}</code></td>
+                            <td>
+                                {% if e.source == 'dhcp' %}<span class="badge bg-success">dhcp</span>
+                                {% elif e.source == 'static' %}<span class="badge bg-secondary">static</span>
+                                {% else %}<span class="badge bg-info text-dark">{{ e.source }}</span>{% endif %}
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="3" class="text-secondary text-center py-3">no zone entries — has the dhcp server started binding leases yet?</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const mix = {{ rcode_json | safe }};
+        const ctx = document.getElementById("rcode-chart").getContext("2d");
+        new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["noerror", "nxdomain", "refused", "notimpl", "formerr"],
+                datasets: [{
+                    data: [mix.noerror, mix.nxdomain, mix.refused, mix.notimpl, mix.formerr],
+                    backgroundColor: ["#198754", "#ffc107", "#dc3545", "#6c757d", "#0dcaf0"],
+                }],
+            },
+            options: { responsive: true, plugins: { legend: { position: "bottom" } } },
+        });
+    })();
+</script>
+{% endblock %}

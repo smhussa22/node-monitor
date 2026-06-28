@@ -33,6 +33,8 @@ spec:
                   fieldPath: metadata.name
             - name: DHCP_SERVER
               value: "collector"
+            - name: DNS_SERVER
+              value: "collector"
           args:
             - "--vendor=cisco"
             - "--count=100"

@@ -19,13 +19,14 @@
 
 // project headers
 #include "DhcpPacket.hh"
+#include "DnsPacket.hh"
 #include "Metric.hh"
 
 namespace NodeMonitor
 {
 
-    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl, std::shared_ptr<DhcpServer> dhcp)
-        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_dhcp { std::move(dhcp) }, m_port { port }
+    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl, std::shared_ptr<DhcpServer> dhcp, std::shared_ptr<DnsServer> dns, std::shared_ptr<DnsZone> dns_zone)
+        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_dhcp { std::move(dhcp) }, m_dns { std::move(dns) }, m_dns_zone { std::move(dns_zone) }, m_port { port }
     {
 
     }
@@ -203,6 +204,9 @@ namespace NodeMonitor
         // GET /dhcp/leases returns a json snapshot of the dhcp server's totals + live lease table
         if (method == "GET" && path == "/dhcp/leases") return build_response(200, "OK", "application/json", dhcp_snapshot_json());
 
+        // GET /dns/zone returns the dns server's counters + current zone entries
+        if (method == "GET" && path == "/dns/zone") return build_response(200, "OK", "application/json", dns_snapshot_json());
+
         // GET /healthz is a cheap liveness probe; no db touch, no acl touch
         if (method == "GET" && path == "/healthz") return build_response(200, "OK", "application/json", "{\"ok\":true}");
 
@@ -306,6 +310,52 @@ namespace NodeMonitor
             leases_arr.push_back(l);
         }
         out["leases"] = leases_arr;
+        return out.dump();
+
+    }
+
+    std::string CollectorServer::dns_snapshot_json() const
+    {
+
+        if (!m_dns && !m_dns_zone)
+            return std::string { "{\"totals\":{\"queries\":0,\"noerror\":0,\"nxdomain\":0,\"refused\":0,\"notimpl\":0,\"formerr\":0},\"zone\":\"\",\"entries\":[]}" };
+
+        ::nlohmann::json out { };
+        if (m_dns)
+        {
+            out["totals"]["queries"]  = m_dns->query_count();
+            out["totals"]["noerror"]  = m_dns->noerror_count();
+            out["totals"]["nxdomain"] = m_dns->nxdomain_count();
+            out["totals"]["refused"]  = m_dns->refused_count();
+            out["totals"]["notimpl"]  = m_dns->notimpl_count();
+            out["totals"]["formerr"]  = m_dns->formerr_count();
+        }
+        else
+        {
+            out["totals"]["queries"]  = 0;
+            out["totals"]["noerror"]  = 0;
+            out["totals"]["nxdomain"] = 0;
+            out["totals"]["refused"]  = 0;
+            out["totals"]["notimpl"]  = 0;
+            out["totals"]["formerr"]  = 0;
+        }
+
+        out["zone"] = m_dns_zone ? m_dns_zone->suffix() : std::string { };
+
+        ::nlohmann::json entries_arr = ::nlohmann::json::array();
+        if (m_dns_zone)
+        {
+            for (const auto& e : m_dns_zone->snapshot())
+            {
+                ::nlohmann::json item { };
+                item["fqdn"] = e.m_fqdn;
+                item["ip"] = ipv4_to_dotted(e.m_ip);
+                item["source"] = e.m_source;
+                entries_arr.push_back(item);
+            }
+        }
+        out["entries"] = entries_arr;
+
         return out.dump();
 
     }

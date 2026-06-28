@@ -30,6 +30,8 @@ spec:
                   fieldPath: metadata.name
             - name: DHCP_SERVER
               value: "collector"
+            - name: DNS_SERVER
+              value: "collector"
           args:
             - "--vendor=paloalto"
             - "--count=50"

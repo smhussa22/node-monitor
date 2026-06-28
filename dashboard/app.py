@@ -40,6 +40,20 @@ def fetch_dhcp_snapshot() -> dict:
         }
 
 
+# fetch the live dns zone snapshot from the collector
+def fetch_dns_snapshot() -> dict:
+
+    try:
+        with urlopen(f"{COLLECTOR_URL}/dns/zone", timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (URLError, OSError, ValueError):
+        return {
+            "totals": {"queries": 0, "noerror": 0, "nxdomain": 0, "refused": 0, "notimpl": 0, "formerr": 0},
+            "zone": "",
+            "entries": [],
+        }
+
+
 app = Flask(__name__)
 
 
@@ -353,6 +367,47 @@ def actions() -> str:
     return render_template("actions.html", actions=rows, by_status=by_status, by_runbook=by_runbook)
 
 
+@app.route("/dns")
+def dns() -> str:
+
+    snapshot = fetch_dns_snapshot()
+    totals = snapshot.get("totals", {})
+    entries = sorted(snapshot.get("entries", []), key=lambda e: e.get("fqdn", ""))
+    by_source: dict = {}
+    for e in entries:
+        by_source[e.get("source", "unknown")] = by_source.get(e.get("source", "unknown"), 0) + 1
+
+    queries = int(totals.get("queries", 0))
+    noerror = int(totals.get("noerror", 0))
+    nxdomain = int(totals.get("nxdomain", 0))
+    refused = int(totals.get("refused", 0))
+    notimpl = int(totals.get("notimpl", 0))
+    formerr = int(totals.get("formerr", 0))
+
+    rcode_json = json.dumps({
+        "noerror": noerror,
+        "nxdomain": nxdomain,
+        "refused": refused,
+        "notimpl": notimpl,
+        "formerr": formerr,
+    })
+
+    return render_template(
+        "dns.html",
+        snapshot=snapshot,
+        totals=totals,
+        entries=entries,
+        by_source=by_source,
+        queries=queries,
+        noerror=noerror,
+        nxdomain=nxdomain,
+        refused=refused,
+        notimpl=notimpl,
+        formerr=formerr,
+        rcode_json=rcode_json,
+    )
+
+
 @app.route("/dhcp")
 def dhcp() -> str:
 
@@ -539,6 +594,12 @@ def api_acl_rules() -> Response:
 def api_dhcp_leases() -> Response:
 
     return jsonify(fetch_dhcp_snapshot())
+
+
+@app.route("/api/dns/zone")
+def api_dns_zone() -> Response:
+
+    return jsonify(fetch_dns_snapshot())
 
 
 @app.route("/api/summary")

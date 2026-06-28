@@ -5,6 +5,7 @@
 #include "DhcpLease.hh"
 #include "DhcpPacket.hh"
 #include "DhcpPool.hh"
+#include "DnsZone.hh"
 #include "MetricStore.hh"
 #include "SocketFd.hh"
 
@@ -39,7 +40,7 @@ namespace NodeMonitor
     public:
 
         DhcpServer() = delete;
-        DhcpServer(std::uint16_t port, std::unique_ptr<DhcpPool> pool, std::shared_ptr<MetricStore> store, std::uint32_t server_id);
+        DhcpServer(std::uint16_t port, std::unique_ptr<DhcpPool> pool, std::shared_ptr<MetricStore> store, std::uint32_t server_id, std::shared_ptr<DnsZone> zone = nullptr);
         ~DhcpServer();
 
         DhcpServer(const DhcpServer&) = delete;
@@ -110,6 +111,7 @@ namespace NodeMonitor
         std::uint32_t m_server_id { 0 };                // server identifier sent in option 54; host byte order
 
         std::shared_ptr<MetricStore> m_store { };       // optional postgres persistence; null when disabled
+        std::shared_ptr<DnsZone> m_dns_zone { };        // optional dns zone; updated on ACK / RELEASE / expiry
 
         std::atomic<std::uint64_t> m_discover_count { 0 };
         std::atomic<std::uint64_t> m_offer_count { 0 };

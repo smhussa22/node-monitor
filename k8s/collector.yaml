@@ -22,6 +22,10 @@ spec:
       port: 67
       targetPort: 67
       protocol: UDP
+    - name: dns
+      port: 53
+      targetPort: 53
+      protocol: UDP
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -59,6 +63,9 @@ spec:
               protocol: UDP
             - name: dhcp
               containerPort: 67
+              protocol: UDP
+            - name: dns
+              containerPort: 53
               protocol: UDP
           # placeholders so a future Phase 3 MetricStore can pick the dsn up; safe to ignore for now
           env:

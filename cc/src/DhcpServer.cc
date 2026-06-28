@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <mutex>
 #include <print>
 #include <string>
@@ -64,8 +65,8 @@ namespace NodeMonitor
 
     }
 
-    DhcpServer::DhcpServer(std::uint16_t port, std::unique_ptr<DhcpPool> pool, std::shared_ptr<MetricStore> store, std::uint32_t server_id)
-        : m_port { port }, m_pool { std::move(pool) }, m_server_id { server_id }, m_store { std::move(store) }
+    DhcpServer::DhcpServer(std::uint16_t port, std::unique_ptr<DhcpPool> pool, std::shared_ptr<MetricStore> store, std::uint32_t server_id, std::shared_ptr<DnsZone> zone)
+        : m_port { port }, m_pool { std::move(pool) }, m_server_id { server_id }, m_store { std::move(store) }, m_dns_zone { std::move(zone) }
     {
 
     }
@@ -302,6 +303,12 @@ namespace NodeMonitor
                     it->second.m_state = DhcpLeaseState::Expired;
                     m_expired_count.fetch_add(1uz, std::memory_order_relaxed);
                     if (m_store) m_store->record_dhcp_lease(it->second);
+                    if (m_dns_zone)
+                    {
+                        std::string label { it->second.m_hostname };
+                        if (label.empty()) label = std::format("mac-{:012x}", it->first);
+                        m_dns_zone->unbind(label);
+                    }
 
                     // keep the expired record around briefly so dashboard observers see it before we
                     // drop it; for now we remove immediately to keep memory bounded
@@ -412,6 +419,15 @@ namespace NodeMonitor
         m_ack_count.fetch_add(1uz, std::memory_order_relaxed);
         std::println("[dhcp] ACK mac={} ip={} lease={}s", mac_to_string(mac), ipv4_to_dotted(bound.m_ip), m_pool ? m_pool->lease_duration().count() : 3600);
 
+        // populate the DNS zone so other clients can resolve this host by name. we bind the lease's
+        // hostname (from option 12) when present; otherwise we fall back to a "mac-aabbcc" short label
+        if (m_dns_zone)
+        {
+            std::string label { bound.m_hostname };
+            if (label.empty()) label = std::format("mac-{:012x}", mac);
+            m_dns_zone->bind(label, bound.m_ip, "dhcp");
+        }
+
     }
 
     void DhcpServer::handle_release(const DhcpPacket& pkt)
@@ -429,6 +445,12 @@ namespace NodeMonitor
         if (m_pool) m_pool->release(it->second.m_ip);
         it->second.m_state = DhcpLeaseState::Released;
         if (m_store) m_store->record_dhcp_lease(it->second);
+        if (m_dns_zone)
+        {
+            std::string label { it->second.m_hostname };
+            if (label.empty()) label = std::format("mac-{:012x}", mac);
+            m_dns_zone->unbind(label);
+        }
         m_leases.erase(it);
 
     }

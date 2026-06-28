@@ -30,6 +30,8 @@
 #include "DhcpPacket.hh"
 #include "DhcpPool.hh"
 #include "DhcpServer.hh"
+#include "DnsServer.hh"
+#include "DnsZone.hh"
 #include "K8sClient.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
@@ -102,11 +104,27 @@ int main()
         try { dhcp_port = static_cast<std::uint16_t>(std::stoi(dp)); }
         catch (...) { /* keep default */ }
     }
-    auto dhcp { std::make_shared<nm::DhcpServer>(dhcp_port, std::move(dhcp_pool), store, k_pool_gateway) };
+    // dns zone shared between the dhcp server (which populates it on ACK) and the dns server (which
+    // serves A + PTR queries against it). hardcode a "collector" entry pointing at the pool's gateway
+    // so simulators can resolve "collector.node-monitor.local" before they push any data
+    auto dns_zone { std::make_shared<nm::DnsZone>("node-monitor.local") };
+    dns_zone->bind("collector", k_pool_gateway, "static");
 
-    // construct the collector server bound to a default port; acl + dhcp are shared so GET /acl/rules
-    // and GET /dhcp/leases return live state from the same engines that handle real traffic
-    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl, dhcp };
+    auto dhcp { std::make_shared<nm::DhcpServer>(dhcp_port, std::move(dhcp_pool), store, k_pool_gateway, dns_zone) };
+
+    // dns server defaults to udp/53; same env override pattern as dhcp for local dev without privileged ports
+    std::uint16_t dns_port { 53 };
+    if (const char* dp { std::getenv("DNS_PORT") }; dp != nullptr)
+    {
+        try { dns_port = static_cast<std::uint16_t>(std::stoi(dp)); }
+        catch (...) { /* keep default */ }
+    }
+    auto dns { std::make_shared<nm::DnsServer>(dns_port, dns_zone) };
+
+    // construct the collector server bound to a default port; acl + dhcp + dns are shared so the http
+    // endpoints (/acl/rules, /dhcp/leases, /dns/zone) return live state from the same engines that
+    // handle real traffic
+    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl, dhcp, dns, dns_zone };
 
     // construct the netflow receiver bound to the standard netflow v5/v9 port
     nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store, acl };
@@ -214,11 +232,13 @@ int main()
     scheduler.start();
     netflow.start();
     dhcp->start();
+    dns->start();
     std::println("node-monitor collector running on port 8000");
     std::this_thread::sleep_for(std::chrono::hours { 1 });
 
     // graceful shutdown in reverse start order
     scheduler.stop();
+    dns->stop();
     dhcp->stop();
     netflow.stop();
     server.stop();
