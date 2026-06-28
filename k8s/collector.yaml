@@ -88,6 +88,12 @@ spec:
                 secretKeyRef:
                   name: postgres-credentials
                   key: POSTGRES_DB
+            # snmp poller targets: one simulator pod per vendor exposes a primary device on UDP/161,
+            # reachable via its service name on the cluster network. comma-separated host[:port] entries
+            - name: SNMP_TARGETS
+              value: "simulator-cisco,simulator-juniper,simulator-paloalto"
+            - name: SNMP_COMMUNITY
+              value: "public"
           resources:
             requests:
               cpu: "200m"

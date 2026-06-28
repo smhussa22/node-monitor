@@ -32,6 +32,7 @@
 #include "DhcpServer.hh"
 #include "DnsServer.hh"
 #include "DnsZone.hh"
+#include "SnmpPoller.hh"
 #include "K8sClient.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
@@ -121,10 +122,45 @@ int main()
     }
     auto dns { std::make_shared<nm::DnsServer>(dns_port, dns_zone) };
 
-    // construct the collector server bound to a default port; acl + dhcp + dns are shared so the http
-    // endpoints (/acl/rules, /dhcp/leases, /dns/zone) return live state from the same engines that
-    // handle real traffic
-    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl, dhcp, dns, dns_zone };
+    // snmp poller: seeds its target list from SNMP_TARGETS (comma-separated host[:port] entries). when
+    // unset the poller still runs but does nothing — wired this way so local dev without simulator agents
+    // doesn't waste resources. community is read once from SNMP_COMMUNITY; defaults to "public" per v2c
+    auto snmp { std::make_shared<nm::SnmpPoller>(cache, store, std::chrono::seconds { 30 }, std::chrono::milliseconds { 2000 }) };
+    {
+        std::string community { "public" };
+        if (const char* c { std::getenv("SNMP_COMMUNITY") }; c != nullptr) community = c;
+        if (const char* raw { std::getenv("SNMP_TARGETS") }; raw != nullptr)
+        {
+            std::string s { raw };
+            std::size_t start { 0uz };
+            for (std::size_t i { 0uz }; i <= s.size(); ++i)
+            {
+                if (i == s.size() || s[i] == ',')
+                {
+                    if (i > start)
+                    {
+                        std::string entry { s.substr(start, i - start) };
+                        std::uint16_t port { 161 };
+                        std::string host { entry };
+                        auto colon { entry.find(':') };
+                        if (colon != std::string::npos)
+                        {
+                            host = entry.substr(0uz, colon);
+                            try { port = static_cast<std::uint16_t>(std::stoi(entry.substr(colon + 1uz))); } catch (...) { port = 161; }
+                        }
+                        snmp->add_target(host, port, community);
+                        std::println("snmp poller target {}:{}", host, port);
+                    }
+                    start = i + 1uz;
+                }
+            }
+        }
+    }
+
+    // construct the collector server bound to a default port; acl + dhcp + dns + snmp are shared so
+    // /acl/rules, /dhcp/leases, /dns/zone, /snmp/agents all return live state from the same engines
+    // that handle real traffic
+    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl, dhcp, dns, dns_zone, snmp };
 
     // construct the netflow receiver bound to the standard netflow v5/v9 port
     nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store, acl };
@@ -233,11 +269,13 @@ int main()
     netflow.start();
     dhcp->start();
     dns->start();
+    snmp->start();
     std::println("node-monitor collector running on port 8000");
     std::this_thread::sleep_for(std::chrono::hours { 1 });
 
     // graceful shutdown in reverse start order
     scheduler.stop();
+    snmp->stop();
     dns->stop();
     dhcp->stop();
     netflow.stop();

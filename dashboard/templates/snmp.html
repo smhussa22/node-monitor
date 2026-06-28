@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}snmp · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">polls</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(polls) }}</div>
+                <div class="text-secondary small">since collector start</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">success rate</div>
+                <div class="display-6 fw-bold text-success">{{ "{:.1f}".format(success_rate) }}%</div>
+                <div class="text-secondary small">{{ "{:,}".format(successes) }} / {{ "{:,}".format(polls) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">timeouts</div>
+                <div class="display-6 fw-bold text-warning">{{ "{:,}".format(timeouts) }}</div>
+                <div class="text-secondary small">agent didn't reply within deadline</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">parse errors</div>
+                <div class="display-6 fw-bold text-danger">{{ "{:,}".format(errors) }}</div>
+                <div class="text-secondary small">malformed BER / mismatched id</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-5">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">outcome mix</div>
+            <div class="card-body">
+                <canvas id="snmp-mix-chart" height="180"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">last-polled values <span class="text-secondary small">(per agent)</span></div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>host</th><th>sysName</th><th class="text-end">cpu</th><th class="text-end">mem</th><th class="text-end">uptime</th></tr></thead>
+                    <tbody>
+                    {% for a in agents %}
+                        <tr>
+                            <td><code>{{ a.host }}</code></td>
+                            <td>{{ a.sys_name or "—" }}</td>
+                            <td class="text-end">{{ a.cpu }}</td>
+                            <td class="text-end">{{ a.memory }}</td>
+                            <td class="text-end text-secondary small">{{ "{:,}".format(a.uptime_ticks // 100) }}s</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="5" class="text-secondary text-center py-3">no agents — has SNMP_TARGETS been set on the collector?</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">per-target wire activity</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>host</th><th>port</th><th class="text-end">queries</th><th class="text-end">successes</th><th class="text-end">timeouts</th><th class="text-end">errors</th><th class="text-end">last latency</th></tr></thead>
+                    <tbody>
+                    {% for a in agents %}
+                        <tr>
+                            <td><code>{{ a.host }}</code></td>
+                            <td><code>{{ a.port }}</code></td>
+                            <td class="text-end">{{ "{:,}".format(a.queries) }}</td>
+                            <td class="text-end text-success">{{ "{:,}".format(a.successes) }}</td>
+                            <td class="text-end text-warning">{{ "{:,}".format(a.timeouts) }}</td>
+                            <td class="text-end text-danger">{{ "{:,}".format(a.errors) }}</td>
+                            <td class="text-end text-secondary small">{{ a.last_latency_ms }} ms</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="7" class="text-secondary text-center py-3">no targets registered</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const mix = {{ mix_json | safe }};
+        const ctx = document.getElementById("snmp-mix-chart").getContext("2d");
+        new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["successes", "timeouts", "errors"],
+                datasets: [{
+                    data: [mix.successes, mix.timeouts, mix.errors],
+                    backgroundColor: ["#198754", "#ffc107", "#dc3545"],
+                }],
+            },
+            options: { responsive: true, plugins: { legend: { position: "bottom" } } },
+        });
+    })();
+</script>
+{% endblock %}

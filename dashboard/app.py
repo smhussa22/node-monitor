@@ -54,6 +54,19 @@ def fetch_dns_snapshot() -> dict:
         }
 
 
+# fetch the live snmp poller snapshot from the collector
+def fetch_snmp_snapshot() -> dict:
+
+    try:
+        with urlopen(f"{COLLECTOR_URL}/snmp/agents", timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (URLError, OSError, ValueError):
+        return {
+            "totals": {"polls": 0, "successes": 0, "timeouts": 0, "errors": 0},
+            "agents": [],
+        }
+
+
 app = Flask(__name__)
 
 
@@ -367,6 +380,35 @@ def actions() -> str:
     return render_template("actions.html", actions=rows, by_status=by_status, by_runbook=by_runbook)
 
 
+@app.route("/snmp")
+def snmp() -> str:
+
+    snapshot = fetch_snmp_snapshot()
+    totals = snapshot.get("totals", {})
+    agents = sorted(snapshot.get("agents", []), key=lambda a: a.get("host", ""))
+
+    polls = int(totals.get("polls", 0))
+    successes = int(totals.get("successes", 0))
+    timeouts = int(totals.get("timeouts", 0))
+    errors = int(totals.get("errors", 0))
+    success_rate = (successes / polls * 100.0) if polls > 0 else 0.0
+
+    mix_json = json.dumps({"successes": successes, "timeouts": timeouts, "errors": errors})
+
+    return render_template(
+        "snmp.html",
+        snapshot=snapshot,
+        totals=totals,
+        agents=agents,
+        polls=polls,
+        successes=successes,
+        timeouts=timeouts,
+        errors=errors,
+        success_rate=success_rate,
+        mix_json=mix_json,
+    )
+
+
 @app.route("/dns")
 def dns() -> str:
 
@@ -600,6 +642,12 @@ def api_dhcp_leases() -> Response:
 def api_dns_zone() -> Response:
 
     return jsonify(fetch_dns_snapshot())
+
+
+@app.route("/api/snmp/agents")
+def api_snmp_agents() -> Response:
+
+    return jsonify(fetch_snmp_snapshot())
 
 
 @app.route("/api/summary")

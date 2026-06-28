@@ -25,8 +25,8 @@
 namespace NodeMonitor
 {
 
-    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl, std::shared_ptr<DhcpServer> dhcp, std::shared_ptr<DnsServer> dns, std::shared_ptr<DnsZone> dns_zone)
-        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_dhcp { std::move(dhcp) }, m_dns { std::move(dns) }, m_dns_zone { std::move(dns_zone) }, m_port { port }
+    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl, std::shared_ptr<DhcpServer> dhcp, std::shared_ptr<DnsServer> dns, std::shared_ptr<DnsZone> dns_zone, std::shared_ptr<SnmpPoller> snmp)
+        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_dhcp { std::move(dhcp) }, m_dns { std::move(dns) }, m_dns_zone { std::move(dns_zone) }, m_snmp { std::move(snmp) }, m_port { port }
     {
 
     }
@@ -207,6 +207,9 @@ namespace NodeMonitor
         // GET /dns/zone returns the dns server's counters + current zone entries
         if (method == "GET" && path == "/dns/zone") return build_response(200, "OK", "application/json", dns_snapshot_json());
 
+        // GET /snmp/agents returns the snmp poller's per-target state
+        if (method == "GET" && path == "/snmp/agents") return build_response(200, "OK", "application/json", snmp_snapshot_json());
+
         // GET /healthz is a cheap liveness probe; no db touch, no acl touch
         if (method == "GET" && path == "/healthz") return build_response(200, "OK", "application/json", "{\"ok\":true}");
 
@@ -355,6 +358,42 @@ namespace NodeMonitor
             }
         }
         out["entries"] = entries_arr;
+
+        return out.dump();
+
+    }
+
+    std::string CollectorServer::snmp_snapshot_json() const
+    {
+
+        if (!m_snmp)
+            return std::string { "{\"totals\":{\"polls\":0,\"successes\":0,\"timeouts\":0,\"errors\":0},\"agents\":[]}" };
+
+        ::nlohmann::json out { };
+        out["totals"]["polls"]     = m_snmp->total_polls();
+        out["totals"]["successes"] = m_snmp->total_successes();
+        out["totals"]["timeouts"]  = m_snmp->total_timeouts();
+        out["totals"]["errors"]    = m_snmp->total_errors();
+
+        ::nlohmann::json agents_arr = ::nlohmann::json::array();
+        for (const auto& s : m_snmp->snapshot())
+        {
+            ::nlohmann::json a { };
+            a["host"] = s.m_host;
+            a["port"] = s.m_port;
+            a["queries"] = s.m_queries;
+            a["successes"] = s.m_successes;
+            a["timeouts"] = s.m_timeouts;
+            a["errors"] = s.m_errors;
+            a["last_poll_epoch"] = std::chrono::duration<double>(s.m_last_poll.time_since_epoch()).count();
+            a["last_latency_ms"] = s.m_last_latency_ms;
+            a["sys_name"] = s.m_last_sys_name;
+            a["uptime_ticks"] = s.m_last_uptime_ticks;
+            a["cpu"] = s.m_last_cpu;
+            a["memory"] = s.m_last_memory;
+            agents_arr.push_back(a);
+        }
+        out["agents"] = agents_arr;
 
         return out.dump();
 

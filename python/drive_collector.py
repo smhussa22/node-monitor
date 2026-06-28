@@ -5,11 +5,15 @@ import sys
 import time
 from typing import List, Optional
 
+import random
+import time
+
 from simulators.cisco_router import CiscoRouterSimulator
 from simulators.dhcp_client import DhcpClient
 from simulators.dns_client import DnsClient
 from simulators.juniper_srx import JuniperSRXSimulator
 from simulators.paloalto import PaloAltoSimulator
+from simulators.snmp_agent import SnmpAgent, MibTree, install_baseline
 
 
 # spin up a configurable number of simulators that push metrics to the c++ collector
@@ -29,6 +33,8 @@ def main() -> None:
     parser.add_argument("--dns-server", type=str, default=os.environ.get("DNS_SERVER", ""), help="dns server ip; when set, each simulator does live A + PTR lookups against our c++ DnsServer after DORA")
     parser.add_argument("--dns-port", type=int, default=int(os.environ.get("DNS_PORT", "53")), help="dns server udp port")
     parser.add_argument("--dns-zone", type=str, default=os.environ.get("DNS_ZONE", "node-monitor.local"), help="zone suffix used for DNS lookups")
+    parser.add_argument("--snmp-port", type=int, default=int(os.environ.get("SNMP_PORT", "161")), help="udp port the per-process snmp agent binds; set to 0 to disable")
+    parser.add_argument("--snmp-community", type=str, default=os.environ.get("SNMP_COMMUNITY", "public"), help="community string the snmp agent accepts")
     args = parser.parse_args()
 
     # build the DNS client once and reuse it across simulators; resolve_a / resolve_ptr are stateless
@@ -79,12 +85,37 @@ def main() -> None:
         else:
             sims.append(cls(hostname=hostname, collector_url=args.collector, interval_sec=args.interval, assigned_ip=assigned_ip))
 
+    # spin up a single snmp agent for this process; the first simulator's hostname is the device this
+    # agent represents. one agent per container because UDP/161 is a single-binding port. other simulators
+    # in the same process continue to push metrics via http alongside this snmp path
+    snmp_agent: Optional[SnmpAgent] = None
+    if args.snmp_port > 0 and sims:
+        primary = sims[0]
+        primary_vendor = vendors[0 % len(vendors)][0]
+        boot_t = time.time()
+        mib = MibTree()
+        install_baseline(
+            mib,
+            hostname=getattr(primary, "hostname", "snmp-host"),
+            vendor=primary_vendor,
+            descr=f"{primary_vendor} simulator v1.0 (node-monitor)",
+            boot_time=boot_t,
+            get_cpu=lambda: random.uniform(20.0, 85.0),
+            get_mem=lambda: random.uniform(35.0, 75.0),
+        )
+        snmp_agent = SnmpAgent(mib=mib, port=args.snmp_port, community=args.snmp_community)
+        snmp_agent.start()
+        if snmp_agent.running:
+            print(f"[snmp] agent listening udp:{args.snmp_port} community={args.snmp_community} representing {getattr(primary, 'hostname', '?')}")
+
     # install a SIGINT handler so Ctrl+C and k8s SIGTERM stop every simulator cleanly. RELEASE any dhcp
     # leases on the way out so the server can reclaim ips immediately instead of waiting for expiry
     def shutdown(signum, frame) -> None:
         print(f"\nstopping {len(sims)} simulators...")
         for s in sims:
             s.stop()
+        if snmp_agent is not None:
+            snmp_agent.stop()
         for c in dhcp_clients:
             try: c.release()
             except Exception: pass
@@ -109,6 +140,8 @@ def main() -> None:
     print(f"stopping {len(sims)} simulators...")
     for s in sims:
         s.stop()
+    if snmp_agent is not None:
+        snmp_agent.stop()
     for c in dhcp_clients:
         try: c.release()
         except Exception: pass

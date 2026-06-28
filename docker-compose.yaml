@@ -36,6 +36,10 @@ services:
       POSTGRES_USER: nodemonitor
       POSTGRES_PASSWORD: devpass
       POSTGRES_DB: node_monitor
+      # snmp poller: one agent per simulator container is reachable at the docker service name. the
+      # poller queries baseline OIDs (sysName, sysUpTime, enterprise cpu / memory) every 30s
+      SNMP_TARGETS: "simulator-cisco,simulator-juniper,simulator-paloalto"
+      SNMP_COMMUNITY: "public"
     ports:
       - "8000:8000"
       - "2055:2055/udp"

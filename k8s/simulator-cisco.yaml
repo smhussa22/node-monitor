@@ -1,3 +1,23 @@
+# headless Service so the collector's snmp poller can resolve "simulator-cisco" to one of the replica
+# pod IPs and send a real GET to UDP/161. round-robin across replicas is fine for the demo
+apiVersion: v1
+kind: Service
+metadata:
+  name: simulator-cisco
+  labels:
+    app: simulator
+    vendor: cisco
+spec:
+  type: ClusterIP
+  selector:
+    app: simulator
+    vendor: cisco
+  ports:
+    - name: snmp
+      port: 161
+      targetPort: 161
+      protocol: UDP
+---
 # 10 pods x 100 simulated routers each = 1000 cisco devices, each also emitting netflow over udp
 apiVersion: apps/v1
 kind: Deployment
@@ -23,6 +43,14 @@ spec:
         - name: simulator
           image: node-monitor-simulator:latest
           imagePullPolicy: IfNotPresent
+          # NET_BIND_SERVICE so the per-pod SNMP agent can bind UDP/161 without running as root
+          securityContext:
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
+          ports:
+            - name: snmp
+              containerPort: 161
+              protocol: UDP
           # downward api injects the pod name so each pod's simulated hostnames are unique across the fleet.
           # DHCP_SERVER is the collector's clusterip name; drive_collector.py picks it up at startup and
           # has each simulated device run a real DORA exchange before pushing metrics

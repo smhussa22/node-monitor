@@ -8,6 +8,7 @@
 #include "DnsZone.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
+#include "SnmpPoller.hh"
 #include "SocketFd.hh"
 #include "ThreadPool.hh"
 
@@ -34,7 +35,7 @@ namespace NodeMonitor
     public:
 
         CollectorServer() = delete;
-        CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl = nullptr, std::shared_ptr<DhcpServer> dhcp = nullptr, std::shared_ptr<DnsServer> dns = nullptr, std::shared_ptr<DnsZone> dns_zone = nullptr);
+        CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl = nullptr, std::shared_ptr<DhcpServer> dhcp = nullptr, std::shared_ptr<DnsServer> dns = nullptr, std::shared_ptr<DnsZone> dns_zone = nullptr, std::shared_ptr<SnmpPoller> snmp = nullptr);
         ~CollectorServer();
 
         CollectorServer(const CollectorServer&) = delete;
@@ -72,6 +73,9 @@ namespace NodeMonitor
         // build a json snapshot of the dns zone + server counters; used by GET /dns/zone
         std::string dns_snapshot_json() const;
 
+        // build a json snapshot of the snmp poller's per-target state; used by GET /snmp/agents
+        std::string snmp_snapshot_json() const;
+
         std::shared_ptr<MetricCache> m_cache { }; // shared cache for storing incoming metrics
         std::shared_ptr<MetricStore> m_store { }; // optional postgres-backed persistent store; null when disabled
         std::shared_ptr<ThreadPool> m_pool { }; // worker pool used to process requests off the accept thread
@@ -79,6 +83,7 @@ namespace NodeMonitor
         std::shared_ptr<DhcpServer> m_dhcp { }; // optional dhcp server; exposed via GET /dhcp/leases
         std::shared_ptr<DnsServer> m_dns { }; // optional dns server; counter source for GET /dns/zone
         std::shared_ptr<DnsZone> m_dns_zone { }; // optional dns zone; entry source for GET /dns/zone
+        std::shared_ptr<SnmpPoller> m_snmp { }; // optional snmp poller; exposed via GET /snmp/agents
         std::uint16_t m_port { 0 }; // tcp port the server listens on
         SocketFd m_listen_socket { }; // raii owned listening socket file descriptor
         std::thread m_accept_thread { }; // thread that accepts new connections

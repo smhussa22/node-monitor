@@ -1,3 +1,22 @@
+# headless Service so the collector's snmp poller can resolve "simulator-juniper" and reach UDP/161
+apiVersion: v1
+kind: Service
+metadata:
+  name: simulator-juniper
+  labels:
+    app: simulator
+    vendor: juniper
+spec:
+  type: ClusterIP
+  selector:
+    app: simulator
+    vendor: juniper
+  ports:
+    - name: snmp
+      port: 161
+      targetPort: 161
+      protocol: UDP
+---
 # 5 pods x 20 simulated firewalls each = 100 juniper srx devices
 apiVersion: apps/v1
 kind: Deployment
@@ -23,6 +42,13 @@ spec:
         - name: simulator
           image: node-monitor-simulator:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
+          ports:
+            - name: snmp
+              containerPort: 161
+              protocol: UDP
           env:
             - name: POD_NAME
               valueFrom:
