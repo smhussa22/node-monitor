@@ -23,12 +23,16 @@ spec:
         - name: simulator
           image: node-monitor-simulator:latest
           imagePullPolicy: IfNotPresent
-          # downward api injects the pod name so each pod's simulated hostnames are unique across the fleet
+          # downward api injects the pod name so each pod's simulated hostnames are unique across the fleet.
+          # DHCP_SERVER is the collector's clusterip name; drive_collector.py picks it up at startup and
+          # has each simulated device run a real DORA exchange before pushing metrics
           env:
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: DHCP_SERVER
+              value: "collector"
           args:
             - "--vendor=cisco"
             - "--count=100"

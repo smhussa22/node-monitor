@@ -35,6 +35,7 @@ set(LIB_SOURCES
     src/Action.cc
     src/AlertEngine.cc
     src/CollectorServer.cc
+    src/DhcpExhaustionRule.cc
     src/DhcpLease.cc
     src/DhcpPacket.cc
     src/DhcpPool.cc

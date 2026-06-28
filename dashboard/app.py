@@ -27,6 +27,19 @@ def fetch_acl_snapshot() -> dict:
         return {"totals": {"evaluations": 0, "permits": 0, "denies": 0, "implicit_denies": 0}, "rules": []}
 
 
+# fetch the live dhcp lease snapshot from the collector; same empty-payload behavior as the acl helper
+def fetch_dhcp_snapshot() -> dict:
+
+    try:
+        with urlopen(f"{COLLECTOR_URL}/dhcp/leases", timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (URLError, OSError, ValueError):
+        return {
+            "totals": {"discovers": 0, "offers": 0, "requests": 0, "acks": 0, "naks": 0, "releases": 0, "expired": 0, "pool_total": 0, "pool_free": 0, "pool_in_use": 0},
+            "leases": [],
+        }
+
+
 app = Flask(__name__)
 
 
@@ -340,6 +353,58 @@ def actions() -> str:
     return render_template("actions.html", actions=rows, by_status=by_status, by_runbook=by_runbook)
 
 
+@app.route("/dhcp")
+def dhcp() -> str:
+
+    window = current_window()
+    interval = window_interval(window)
+
+    # live totals + currently-tracked leases come from the c++ collector's in-memory state
+    snapshot = fetch_dhcp_snapshot()
+
+    # DORA activity per minute over the chosen window, straight from the dhcp_leases history table
+    activity_rows = query_all(
+        "SELECT date_trunc('minute', recorded_at) AS minute, state, COUNT(*) AS n "
+        "FROM dhcp_leases "
+        f"WHERE recorded_at > NOW() - INTERVAL '{interval}' "
+        "GROUP BY minute, state ORDER BY minute ASC"
+    )
+    # collapse into one entry per minute with per-state counts so the chart can stack bars
+    by_minute: dict = {}
+    for r in activity_rows:
+        key = r["minute"].isoformat() if r["minute"] else ""
+        bucket = by_minute.setdefault(key, {"minute": key, "offered": 0, "bound": 0, "released": 0, "expired": 0})
+        bucket[r["state"]] = int(r["n"])
+    activity_json = json.dumps(list(by_minute.values()))
+
+    # the freshest record per mac is the device's current binding from postgres' perspective
+    current = query_all(
+        "SELECT DISTINCT ON (mac) mac, ip, state, hostname, granted_at, expires_at "
+        "FROM dhcp_leases "
+        f"WHERE recorded_at > NOW() - INTERVAL '{interval}' "
+        "ORDER BY mac, recorded_at DESC"
+    )
+
+    # split into pool-utilization slices for the donut + a flat summary
+    totals = snapshot.get("totals", {})
+    pool_total = int(totals.get("pool_total", 0))
+    pool_free = int(totals.get("pool_free", 0))
+    pool_in_use = int(totals.get("pool_in_use", 0))
+    util_pct = (pool_in_use / pool_total * 100.0) if pool_total > 0 else 0.0
+
+    return render_template(
+        "dhcp.html",
+        snapshot=snapshot,
+        totals=totals,
+        pool_total=pool_total,
+        pool_free=pool_free,
+        pool_in_use=pool_in_use,
+        util_pct=util_pct,
+        current=current,
+        activity_json=activity_json,
+    )
+
+
 @app.route("/blocked-traffic")
 def blocked_traffic() -> str:
 
@@ -468,6 +533,12 @@ def netflow() -> str:
 def api_acl_rules() -> Response:
 
     return jsonify(fetch_acl_snapshot())
+
+
+@app.route("/api/dhcp/leases")
+def api_dhcp_leases() -> Response:
+
+    return jsonify(fetch_dhcp_snapshot())
 
 
 @app.route("/api/summary")

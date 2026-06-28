@@ -26,6 +26,7 @@
 #include "Action.hh"
 #include "AlertEngine.hh"
 #include "CollectorServer.hh"
+#include "DhcpExhaustionRule.hh"
 #include "DhcpPacket.hh"
 #include "DhcpPool.hh"
 #include "DhcpServer.hh"
@@ -84,13 +85,6 @@ int main()
     acl->register_rule(std::make_unique<nm::AclRule>(7u,  nm::AclAction::Deny,   nm::AclProtocol::Tcp,  nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("23"),   "deny telnet"));
     acl->register_rule(std::make_unique<nm::AclRule>(8u,  nm::AclAction::Deny,   nm::AclProtocol::Icmp, nm::parse_cidr("any"),         nm::parse_cidr("any"), nm::parse_port_range("any"), nm::parse_port_range("any"),  "deny icmp"));
 
-    // construct the collector server bound to a default port; acl is shared with the netflow receiver so
-    // GET /acl/rules returns the same engine state that decides flow verdicts
-    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl };
-
-    // construct the netflow receiver bound to the standard netflow v5/v9 port
-    nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store, acl };
-
     // construct the dhcp server with a /16 pool (~65k usable ips) and 1h leases. on kubernetes we run
     // unicast — simulators are configured at deploy time with this server's clusterip — so we don't need
     // an L2 broadcast domain. server identifier 10.42.0.1 doubles as the gateway in option 3, and our
@@ -108,7 +102,14 @@ int main()
         try { dhcp_port = static_cast<std::uint16_t>(std::stoi(dp)); }
         catch (...) { /* keep default */ }
     }
-    nm::DhcpServer dhcp { dhcp_port, std::move(dhcp_pool), store, k_pool_gateway };
+    auto dhcp { std::make_shared<nm::DhcpServer>(dhcp_port, std::move(dhcp_pool), store, k_pool_gateway) };
+
+    // construct the collector server bound to a default port; acl + dhcp are shared so GET /acl/rules
+    // and GET /dhcp/leases return live state from the same engines that handle real traffic
+    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl, dhcp };
+
+    // construct the netflow receiver bound to the standard netflow v5/v9 port
+    nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store, acl };
 
     // construct the scheduler that will drive periodic display tasks
     nm::Scheduler scheduler { };
@@ -191,6 +192,10 @@ int main()
     // ticks of the alert engine (10s cadence) so the threshold is denies-per-second, not denies-per-tick
     alerts->register_rule(std::make_unique<nm::AclRateRule>("acl_deny_storm", 50.0, 30s, "warning", acl));
 
+    // operational signal: fires when fewer than 10% of the dhcp pool's addresses are free; gives an
+    // operator advance warning before clients start failing to bind
+    alerts->register_rule(std::make_unique<nm::DhcpExhaustionRule>("dhcp_pool_exhaustion", 0.10, 60s, "warning", dhcp));
+
     // schedule a periodic snapshot of the cache and print one line per device
     scheduler.schedule([cache]
     {
@@ -208,13 +213,13 @@ int main()
     server.start();
     scheduler.start();
     netflow.start();
-    dhcp.start();
+    dhcp->start();
     std::println("node-monitor collector running on port 8000");
     std::this_thread::sleep_for(std::chrono::hours { 1 });
 
     // graceful shutdown in reverse start order
     scheduler.stop();
-    dhcp.stop();
+    dhcp->stop();
     netflow.stop();
     server.stop();
     pool->shutdown();

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}dhcp · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">pool size</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(pool_total) }}</div>
+                <div class="text-secondary small">addresses in scope</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">in use</div>
+                <div class="display-6 fw-bold text-warning">{{ "{:,}".format(pool_in_use) }}</div>
+                <div class="text-secondary small">{{ "{:.2f}".format(util_pct) }}% utilized</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">free</div>
+                <div class="display-6 fw-bold text-success">{{ "{:,}".format(pool_free) }}</div>
+                <div class="text-secondary small">available for new clients</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">acks</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(totals.acks or 0) }}</div>
+                <div class="text-secondary small">{{ "{:,}".format(totals.discovers or 0) }} discovers · {{ "{:,}".format(totals.naks or 0) }} naks · {{ "{:,}".format(totals.expired or 0) }} expired</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">pool utilization</div>
+            <div class="card-body">
+                <canvas id="pool-chart" height="180"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">DORA activity per minute <span class="text-secondary small">(window: {{ current_window }})</span></div>
+            <div class="card-body">
+                <canvas id="activity-chart" height="180"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">current leases <span class="text-secondary small">(latest record per mac)</span></div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>mac</th><th>ip</th><th>state</th><th>hostname</th><th>granted</th><th>expires</th></tr></thead>
+                    <tbody>
+                    {% for r in current %}
+                        <tr>
+                            <td><code>{{ r.mac }}</code></td>
+                            <td><code>{{ r.ip }}</code></td>
+                            <td>
+                                {% if r.state == 'bound' %}<span class="badge bg-success">bound</span>
+                                {% elif r.state == 'offered' %}<span class="badge bg-info text-dark">offered</span>
+                                {% elif r.state == 'released' %}<span class="badge bg-secondary">released</span>
+                                {% elif r.state == 'expired' %}<span class="badge bg-warning text-dark">expired</span>
+                                {% else %}{{ r.state }}{% endif %}
+                            </td>
+                            <td>{{ r.hostname or "" }}</td>
+                            <td class="text-secondary small">{{ r.granted_at.strftime('%H:%M:%S') if r.granted_at else "" }}</td>
+                            <td class="text-secondary small">{{ r.expires_at.strftime('%H:%M:%S') if r.expires_at else "" }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6" class="text-secondary text-center py-3">no leases in this window — is the dhcp server running?</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const poolCtx = document.getElementById("pool-chart").getContext("2d");
+        new Chart(poolCtx, {
+            type: "doughnut",
+            data: {
+                labels: ["in use", "free"],
+                datasets: [{
+                    data: [{{ pool_in_use }}, {{ pool_free }}],
+                    backgroundColor: ["#ffc107", "#198754"],
+                }],
+            },
+            options: { responsive: true, plugins: { legend: { position: "bottom" } } },
+        });
+
+        const activity = {{ activity_json | safe }};
+        const labels = activity.map(b => b.minute.slice(11, 16));
+        const offered = activity.map(b => b.offered);
+        const bound = activity.map(b => b.bound);
+        const released = activity.map(b => b.released);
+        const expired = activity.map(b => b.expired);
+
+        const actCtx = document.getElementById("activity-chart").getContext("2d");
+        new Chart(actCtx, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: "offered",  data: offered,  backgroundColor: "#0dcaf0" },
+                    { label: "bound",    data: bound,    backgroundColor: "#198754" },
+                    { label: "released", data: released, backgroundColor: "#6c757d" },
+                    { label: "expired",  data: expired,  backgroundColor: "#ffc107" },
+                ],
+            },
+            options: {
+                responsive: true,
+                scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+                plugins: { legend: { position: "bottom" } },
+            },
+        });
+    })();
+</script>
+{% endblock %}

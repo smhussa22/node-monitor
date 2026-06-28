@@ -18,6 +18,10 @@ spec:
       port: 2055
       targetPort: 2055
       protocol: UDP
+    - name: dhcp
+      port: 67
+      targetPort: 67
+      protocol: UDP
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -41,12 +45,20 @@ spec:
         - name: collector
           image: node-monitor-collector:latest
           imagePullPolicy: IfNotPresent
+          # NET_BIND_SERVICE lets the dhcp server bind UDP/67 without running the whole container as root.
+          # without this capability, port < 1024 is privileged and the bind would fail
+          securityContext:
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
           ports:
             - name: http
               containerPort: 8000
               protocol: TCP
             - name: netflow
               containerPort: 2055
+              protocol: UDP
+            - name: dhcp
+              containerPort: 67
               protocol: UDP
           # placeholders so a future Phase 3 MetricStore can pick the dsn up; safe to ignore for now
           env:

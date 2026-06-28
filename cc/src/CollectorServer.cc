@@ -18,13 +18,14 @@
 #include <nlohmann/json.hpp>
 
 // project headers
+#include "DhcpPacket.hh"
 #include "Metric.hh"
 
 namespace NodeMonitor
 {
 
-    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl)
-        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_port { port }
+    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl, std::shared_ptr<DhcpServer> dhcp)
+        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_dhcp { std::move(dhcp) }, m_port { port }
     {
 
     }
@@ -199,6 +200,9 @@ namespace NodeMonitor
         // GET /acl/rules returns a json snapshot of the acl engine
         if (method == "GET" && path == "/acl/rules") return build_response(200, "OK", "application/json", acl_snapshot_json());
 
+        // GET /dhcp/leases returns a json snapshot of the dhcp server's totals + live lease table
+        if (method == "GET" && path == "/dhcp/leases") return build_response(200, "OK", "application/json", dhcp_snapshot_json());
+
         // GET /healthz is a cheap liveness probe; no db touch, no acl touch
         if (method == "GET" && path == "/healthz") return build_response(200, "OK", "application/json", "{\"ok\":true}");
 
@@ -246,7 +250,9 @@ namespace NodeMonitor
         out["totals"]["denies"] = m_acl->total_denies();
         out["totals"]["implicit_denies"] = m_acl->implicit_denies();
 
-        ::nlohmann::json rules_arr { ::nlohmann::json::array() };
+        // direct copy-assignment (not brace-init) so nlohmann doesn't wrap the empty array in another array
+        // via its initializer_list ctor
+        ::nlohmann::json rules_arr = ::nlohmann::json::array();
         for (const auto& rule : m_acl->snapshot())
         {
             ::nlohmann::json r { };
@@ -262,6 +268,44 @@ namespace NodeMonitor
             rules_arr.push_back(r);
         }
         out["rules"] = rules_arr;
+        return out.dump();
+
+    }
+
+    std::string CollectorServer::dhcp_snapshot_json() const
+    {
+
+        // empty payload when no server is wired so the dashboard renders cleanly during cold start
+        if (!m_dhcp)
+            return std::string { "{\"totals\":{\"discovers\":0,\"offers\":0,\"requests\":0,\"acks\":0,\"naks\":0,\"releases\":0,\"expired\":0,\"pool_total\":0,\"pool_free\":0,\"pool_in_use\":0},\"leases\":[]}" };
+
+        ::nlohmann::json out { };
+        out["totals"]["discovers"] = m_dhcp->discover_count();
+        out["totals"]["offers"]    = m_dhcp->offer_count();
+        out["totals"]["requests"]  = m_dhcp->request_count();
+        out["totals"]["acks"]      = m_dhcp->ack_count();
+        out["totals"]["naks"]      = m_dhcp->nak_count();
+        out["totals"]["releases"]  = m_dhcp->release_count();
+        out["totals"]["expired"]   = m_dhcp->expired_count();
+        out["totals"]["pool_total"]  = m_dhcp->total_count();
+        out["totals"]["pool_free"]   = m_dhcp->free_count();
+        out["totals"]["pool_in_use"] = m_dhcp->in_use_count();
+
+        // emit timestamps as epoch seconds so the dashboard can format them locally without parsing iso strings
+        // direct copy-assignment so nlohmann's initializer_list ctor doesn't wrap the empty array
+        ::nlohmann::json leases_arr = ::nlohmann::json::array();
+        for (const auto& lease : m_dhcp->lease_snapshot())
+        {
+            ::nlohmann::json l { };
+            l["mac"] = mac_to_string(lease.m_mac);
+            l["ip"] = ipv4_to_dotted(lease.m_ip);
+            l["state"] = to_string(lease.m_state);
+            l["hostname"] = lease.m_hostname;
+            l["granted_at"] = std::chrono::duration<double>(lease.m_granted_at.time_since_epoch()).count();
+            l["expires_at"] = std::chrono::duration<double>(lease.m_expires_at.time_since_epoch()).count();
+            leases_arr.push_back(l);
+        }
+        out["leases"] = leases_arr;
         return out.dump();
 
     }
