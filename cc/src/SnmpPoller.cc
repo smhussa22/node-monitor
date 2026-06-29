@@ -378,11 +378,12 @@ namespace NodeMonitor
         state.m_last_latency_ms = static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count());
         ++state.m_successes;
 
-        // walk the ifTable subtree to enumerate interfaces. failures here don't fail the whole poll;
-        // many devices won't have an iftable or the walk may time out partway. group walk varbinds
-        // into rows keyed by the final OID arc (which is the ifIndex value)
+        // walk the ifTable subtree to enumerate interfaces — using GETBULK so the whole table arrives
+        // in 1-2 round trips instead of N×GETNEXT. failures here don't fail the whole poll; many
+        // devices won't have an iftable or the walk may time out partway. group walk varbinds into
+        // rows keyed by the final OID arc (which is the ifIndex value)
         std::vector<SnmpVarbind> walk_vbs { };
-        if (walk_subtree(state, k_oid_iftable, walk_vbs, 64))
+        if (bulk_subtree(state, k_oid_iftable, walk_vbs, 25u, 4))
         {
             std::unordered_map<std::uint32_t, SnmpIfRow> rows { };
             for (const auto& vb : walk_vbs)
@@ -513,6 +514,88 @@ namespace NodeMonitor
         }
 
         state.m_last_walk_steps = static_cast<std::uint32_t>(steps);
+        return any_returned;
+
+    }
+
+    bool SnmpPoller::bulk_subtree(SnmpTargetState& state, const AsnBer::Oid& root_oid, std::vector<SnmpVarbind>& out_vbs, std::uint32_t max_repetitions, int max_rounds)
+    {
+
+        ::sockaddr_in dest { };
+        if (!resolve_host(state.m_host, state.m_port, dest)) return false;
+
+        AsnBer::Oid current { root_oid };
+        int round { 0 };
+        bool any_returned { false };
+
+        while (round < max_rounds)
+        {
+
+            // build the GetBulkRequest. PDU shape is identical to GetNext except the tag is 0xA5 and the
+            // error-status / error-index slots are reused as non-repeaters / max-repetitions per RFC 3416
+            SnmpMessage msg { };
+            msg.m_version = 1;
+            msg.m_community = state.m_community;
+            msg.m_pdu.m_pdu_tag = AsnBer::k_tag_get_bulk_request;
+            static std::atomic<std::int32_t> s_next_rid { 500000 };
+            msg.m_pdu.m_request_id = s_next_rid.fetch_add(1, std::memory_order_relaxed);
+            msg.m_pdu.m_error_status = 0;                                          // non-repeaters
+            msg.m_pdu.m_error_index = static_cast<std::int32_t>(max_repetitions);  // max-repetitions
+
+            SnmpVarbind vb_in { };
+            vb_in.m_oid = current;
+            vb_in.m_value_tag = AsnBer::k_tag_null;
+            msg.m_pdu.m_varbinds.push_back(std::move(vb_in));
+
+            auto encoded { encode_snmp(msg) };
+
+            int fd { ::socket(AF_INET, SOCK_DGRAM, 0) };
+            if (fd < 0) return any_returned;
+            ::timeval tv { };
+            tv.tv_sec = static_cast<long>(m_per_target_timeout.count() / 1000);
+            tv.tv_usec = static_cast<long>((m_per_target_timeout.count() % 1000) * 1000);
+            ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+            if (::sendto(fd, encoded.data(), encoded.size(), 0, reinterpret_cast<::sockaddr*>(&dest), sizeof(dest)) < 0)
+            {
+                ::close(fd);
+                return any_returned;
+            }
+
+            std::uint8_t buffer[4096] { };
+            ::ssize_t n { ::recvfrom(fd, buffer, sizeof(buffer), 0, nullptr, nullptr) };
+            ::close(fd);
+
+            if (n <= 0) return any_returned;
+
+            auto decoded { decode_snmp(buffer, static_cast<std::size_t>(n)) };
+            if (!decoded.has_value() || decoded->m_pdu.m_request_id != msg.m_pdu.m_request_id) return any_returned;
+            if (decoded->m_pdu.m_varbinds.empty()) return any_returned;
+
+            // walk through each varbind in the bulk response. a single response can carry up to
+            // max_repetitions of them; we filter out those outside the subtree and stop the moment
+            // we see the terminator (endOfMibView, out-of-subtree, or non-monotonic OID)
+            bool walk_finished { false };
+            for (const auto& vb : decoded->m_pdu.m_varbinds)
+            {
+                if (vb.m_value_tag == AsnBer::k_tag_end_of_mib_view) { walk_finished = true; break; }
+                if (!AsnBer::is_descendant(vb.m_oid, root_oid) && AsnBer::compare_oids(vb.m_oid, root_oid) != 0) { walk_finished = true; break; }
+                if (AsnBer::compare_oids(vb.m_oid, current) <= 0) { walk_finished = true; break; }
+
+                out_vbs.push_back(vb);
+                any_returned = true;
+                current = vb.m_oid;
+            }
+
+            if (walk_finished) break;
+
+            // received exactly max_repetitions in-subtree varbinds: there may be more table rows beyond
+            // current. issue another GetBulk starting from there
+            ++round;
+
+        }
+
+        state.m_last_walk_steps = static_cast<std::uint32_t>(round + 1);
         return any_returned;
 
     }

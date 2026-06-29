@@ -420,12 +420,19 @@ class SnmpAgent:
         request_id = _dec_integer(data, rid_tlv[1], rid_tlv[2])
         p_pos += rid_tlv[3]
 
-        # error-status INTEGER, error-index INTEGER (ignored on requests)
-        for _ in range(2):
-            t = _dec_tlv(data, p_pos)
-            if t is None:
-                return None
-            p_pos += t[3]
+        # error-status INTEGER, error-index INTEGER. for GetBulk these slots carry non-repeaters and
+        # max-repetitions per RFC 3416 section 4.2.3, so we read the values rather than skipping them
+        es_tlv = _dec_tlv(data, p_pos)
+        if es_tlv is None or es_tlv[0] != TAG_INTEGER:
+            return None
+        non_repeaters = _dec_integer(data, es_tlv[1], es_tlv[2])
+        p_pos += es_tlv[3]
+
+        ei_tlv = _dec_tlv(data, p_pos)
+        if ei_tlv is None or ei_tlv[0] != TAG_INTEGER:
+            return None
+        max_repetitions = _dec_integer(data, ei_tlv[1], ei_tlv[2])
+        p_pos += ei_tlv[3]
 
         # varbinds SEQUENCE OF SEQUENCE { OID, value }
         vbs_tlv = _dec_tlv(data, p_pos)
@@ -450,24 +457,66 @@ class SnmpAgent:
 
         # build the response varbinds based on PDU type
         response_vbs: bytes = b""
-        for q_oid in query_oids:
-            if pdu_tag == TAG_GET_REQUEST:
-                res = self.mib.get(q_oid)
-                if res is None:
-                    response_vbs += _enc_varbind(q_oid, TAG_NO_SUCH_INSTANCE, None)
-                else:
-                    tag, value = res
-                    response_vbs += _enc_varbind(q_oid, tag, value)
-            elif pdu_tag == TAG_GET_NEXT_REQUEST:
-                nxt = self.mib.get_next(q_oid)
+
+        if pdu_tag == TAG_GET_BULK_REQUEST:
+            # RFC 3416 section 4.2.3: the first non_repeaters varbinds get one GetNext each (scalar values
+            # the manager wants once), the remaining varbinds get max_repetitions GetNexts each (table
+            # columns the manager wants to walk in parallel). responses are packed into a single Response
+            # PDU so the manager gets the whole table chunk in one round trip
+            n_rep = max(0, non_repeaters)
+            n_max = max(0, max_repetitions)
+
+            # non-repeaters: one GetNext per varbind up to n_rep (or the end of query_oids if it's shorter)
+            for i in range(min(n_rep, len(query_oids))):
+                q = query_oids[i]
+                nxt = self.mib.get_next(q)
                 if nxt is None:
-                    response_vbs += _enc_varbind(q_oid, TAG_END_OF_MIB_VIEW, None)
+                    response_vbs += _enc_varbind(q, TAG_END_OF_MIB_VIEW, None)
                 else:
                     nxt_oid, nxt_tag, nxt_val = nxt
                     response_vbs += _enc_varbind(nxt_oid, nxt_tag, nxt_val)
-            else:
-                # GET_BULK / SET / anything else not implemented yet
-                response_vbs += _enc_varbind(q_oid, TAG_NO_SUCH_OBJECT, None)
+
+            # repeaters: each remaining varbind gets walked up to n_max steps. we stop early when ANY of
+            # the columns hits endOfMibView (matches Net-SNMP's behavior — once one column is exhausted
+            # the whole repetition group can stop)
+            repeaters = query_oids[n_rep:]
+            cursors = list(repeaters)
+            for _ in range(n_max):
+                if not cursors: break
+                advanced_any = False
+                new_cursors = []
+                for q in cursors:
+                    nxt = self.mib.get_next(q)
+                    if nxt is None:
+                        response_vbs += _enc_varbind(q, TAG_END_OF_MIB_VIEW, None)
+                        new_cursors.append(None)
+                    else:
+                        nxt_oid, nxt_tag, nxt_val = nxt
+                        response_vbs += _enc_varbind(nxt_oid, nxt_tag, nxt_val)
+                        new_cursors.append(nxt_oid)
+                        advanced_any = True
+                # drop columns that already hit endOfMibView so we don't keep emitting markers
+                cursors = [c for c in new_cursors if c is not None]
+                if not advanced_any: break
+        else:
+            for q_oid in query_oids:
+                if pdu_tag == TAG_GET_REQUEST:
+                    res = self.mib.get(q_oid)
+                    if res is None:
+                        response_vbs += _enc_varbind(q_oid, TAG_NO_SUCH_INSTANCE, None)
+                    else:
+                        tag, value = res
+                        response_vbs += _enc_varbind(q_oid, tag, value)
+                elif pdu_tag == TAG_GET_NEXT_REQUEST:
+                    nxt = self.mib.get_next(q_oid)
+                    if nxt is None:
+                        response_vbs += _enc_varbind(q_oid, TAG_END_OF_MIB_VIEW, None)
+                    else:
+                        nxt_oid, nxt_tag, nxt_val = nxt
+                        response_vbs += _enc_varbind(nxt_oid, nxt_tag, nxt_val)
+                else:
+                    # SET / anything else not implemented
+                    response_vbs += _enc_varbind(q_oid, TAG_NO_SUCH_OBJECT, None)
 
         # wrap into a Response PDU
         pdu_body = enc_integer(request_id) + enc_integer(0) + enc_integer(0) + enc_sequence(response_vbs)

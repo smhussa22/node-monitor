@@ -126,6 +126,13 @@ namespace NodeMonitor
         // with every (OID, value) pair returned during the walk; returns true if at least one row came back
         bool walk_subtree(SnmpTargetState& state, const AsnBer::Oid& root_oid, std::vector<SnmpVarbind>& out_vbs, int max_steps);
 
+        // bulk-walk one subtree via GetBulkRequest (RFC 3416 4.2.3): each request gets back up to
+        // max_repetitions varbinds in a single round trip, which is what every real SNMP manager uses
+        // for table walks. behavior matches walk_subtree (terminates on endOfMibView, on the first OID
+        // outside root_oid's subtree, or after max_rounds requests) — just an order of magnitude
+        // fewer datagrams when the table is large
+        bool bulk_subtree(SnmpTargetState& state, const AsnBer::Oid& root_oid, std::vector<SnmpVarbind>& out_vbs, std::uint32_t max_repetitions, int max_rounds);
+
         std::shared_ptr<MetricCache> m_cache { };                              // existing metric path
         std::shared_ptr<MetricStore> m_store { };                              // optional postgres sink
         std::chrono::seconds m_interval { 30 };                                // seconds between sweeps
