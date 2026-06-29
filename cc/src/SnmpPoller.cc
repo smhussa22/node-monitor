@@ -28,6 +28,7 @@
 
 // project headers
 #include "AsnBer.hh"
+#include "K8sDiscovery.hh"
 #include "Metric.hh"
 #include "SnmpMessage.hh"
 
@@ -81,12 +82,34 @@ namespace NodeMonitor
     {
 
         std::lock_guard<std::mutex> lock { m_mutex };
+        m_static_hosts.insert(host);
         if (m_targets.contains(host)) return;
         SnmpTargetState s { };
         s.m_host = host;
         s.m_port = port;
         s.m_community = community;
         m_targets.emplace(host, std::move(s));
+
+    }
+
+    void SnmpPoller::enable_k8s_discovery(std::shared_ptr<K8sClient> client, const std::string& namespace_, const std::string& label_selector, std::uint16_t snmp_port, const std::string& community)
+    {
+
+        std::lock_guard<std::mutex> lock { m_mutex };
+        m_k8s_client = std::move(client);
+        m_k8s_namespace = namespace_;
+        m_k8s_label_selector = label_selector;
+        m_k8s_snmp_port = snmp_port;
+        m_k8s_community = community;
+
+    }
+
+    std::string SnmpPoller::discovery_mode() const
+    {
+
+        std::lock_guard<std::mutex> lock { m_mutex };
+        if (m_k8s_client && !m_k8s_client->is_dry_run()) return "k8s+static";
+        return "static";
 
     }
 
@@ -163,6 +186,53 @@ namespace NodeMonitor
 
         while (m_running.load())
         {
+
+            // if k8s discovery is enabled, refresh the dynamic target set before polling. discovered
+            // pods are added; targets whose pods have vanished are removed (only those not also
+            // registered as static via SNMP_TARGETS). discovery failures fall back to whatever's
+            // currently registered — best-effort, never crashing the polling loop
+            std::shared_ptr<K8sClient> k8s_snapshot { };
+            std::string ns_snapshot { };
+            std::string label_snapshot { };
+            std::uint16_t k8s_port_snapshot { 161 };
+            std::string k8s_community_snapshot { "public" };
+            {
+                std::lock_guard<std::mutex> lock { m_mutex };
+                k8s_snapshot = m_k8s_client;
+                ns_snapshot = m_k8s_namespace;
+                label_snapshot = m_k8s_label_selector;
+                k8s_port_snapshot = m_k8s_snmp_port;
+                k8s_community_snapshot = m_k8s_community;
+            }
+            if (k8s_snapshot && !k8s_snapshot->is_dry_run())
+            {
+                auto pods { discover_pods(*k8s_snapshot, ns_snapshot, label_snapshot) };
+
+                std::unordered_set<std::string> live_ips { };
+                live_ips.reserve(pods.size());
+                for (const auto& pod : pods) if (pod.m_ready) live_ips.insert(pod.m_ip);
+
+                std::lock_guard<std::mutex> lock { m_mutex };
+
+                // add newly-discovered pods
+                for (const auto& ip : live_ips)
+                {
+                    if (m_targets.contains(ip)) continue;
+                    SnmpTargetState s { };
+                    s.m_host = ip;
+                    s.m_port = k8s_port_snapshot;
+                    s.m_community = k8s_community_snapshot;
+                    m_targets.emplace(ip, std::move(s));
+                }
+
+                // remove non-static targets whose pods have vanished from the cluster
+                for (auto it { m_targets.begin() }; it != m_targets.end(); )
+                {
+                    if (m_static_hosts.contains(it->first)) { ++it; continue; }
+                    if (live_ips.contains(it->first)) { ++it; continue; }
+                    it = m_targets.erase(it);
+                }
+            }
 
             // grab a snapshot list of hosts under the lock; poll each without holding the lock so the
             // sweep can take seconds without blocking add_target / snapshot calls

@@ -50,6 +50,7 @@ set(LIB_SOURCES
     src/SnmpPoller.cc
     src/SnmpTrapReceiver.cc
     src/K8sClient.cc
+    src/K8sDiscovery.cc
     src/MetricCache.cc
     src/MetricStore.cc
     src/NetflowReceiver.cc

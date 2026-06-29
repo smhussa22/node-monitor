@@ -3,6 +3,7 @@
 
 // related headers
 #include "AsnBer.hh"
+#include "K8sClient.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
 #include "SnmpMessage.hh"
@@ -19,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // 3rd party headers
@@ -86,6 +88,15 @@ namespace NodeMonitor
         // register one polling target; safe to call before start(). duplicates by host are deduplicated
         void add_target(const std::string& host, std::uint16_t port, const std::string& community);
 
+        // turn on dynamic target discovery via the kubernetes API. on each sweep the poller calls
+        // discover_pods(client, namespace, label_selector), adds any new pod IPs as targets, and removes
+        // targets whose pods have disappeared. static add_target() registrations are preserved alongside
+        // discovered ones. only useful in real (in-cluster) mode; dry-run K8sClients short-circuit
+        void enable_k8s_discovery(std::shared_ptr<K8sClient> client, const std::string& namespace_, const std::string& label_selector, std::uint16_t snmp_port, const std::string& community);
+
+        // current discovery mode for the dashboard: "static" or "k8s+static"
+        std::string discovery_mode() const;
+
         // spawn the polling thread
         void start();
 
@@ -121,7 +132,15 @@ namespace NodeMonitor
         std::chrono::milliseconds m_per_target_timeout { 2000 };               // per-poll recv timeout
 
         std::unordered_map<std::string, SnmpTargetState> m_targets { };        // host -> state
-        mutable std::mutex m_mutex { };                                        // guards m_targets
+        std::unordered_set<std::string> m_static_hosts { };                    // hosts registered via add_target; never expired
+        mutable std::mutex m_mutex { };                                        // guards m_targets + m_static_hosts
+
+        // k8s discovery config; only populated when enable_k8s_discovery() has been called
+        std::shared_ptr<K8sClient> m_k8s_client { };                           // shared client; null disables discovery
+        std::string m_k8s_namespace { "default" };                             // namespace to list pods in
+        std::string m_k8s_label_selector { };                                  // SelectorSyntax string
+        std::uint16_t m_k8s_snmp_port { 161 };                                 // udp port to register discovered pods on
+        std::string m_k8s_community { "public" };                              // community to use for discovered pods
 
         std::thread m_thread { };                                              // polling loop thread
         std::atomic<bool> m_running { false };                                 // shared running flag

@@ -10,6 +10,7 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 
 from db import query_all, query_one
 from filters import parse_filter, window_interval
+import search as search_mod
 
 
 # url of the c++ collector's http endpoint; same in docker-compose and k8s because the service is named "collector"
@@ -378,6 +379,79 @@ def actions() -> str:
         "GROUP BY runbook_name ORDER BY total DESC"
     )
     return render_template("actions.html", actions=rows, by_status=by_status, by_runbook=by_runbook)
+
+
+@app.route("/search")
+def search_page() -> str:
+
+    # parse the user's search expression and route the query to the appropriate source table. errors
+    # are surfaced inline rather than thrown so a typo in the expression doesn't 500 the page
+    q = request.args.get("q", "")
+    parsed = search_mod.parse(q)
+    cfg = search_mod.SOURCE_CONFIG[parsed.source]
+
+    # window comes from the parsed expression's last= clause if present, else the global cookie
+    window = parsed.window or current_window()
+    interval_literal, bucket_literal = search_mod.window_to_interval_and_bucket(window)
+
+    where_sql, where_params = search_mod.build_where(parsed.clauses)
+
+    # the interval literal is inlined (postgres can't bind it as a parameter). safe because window came
+    # from a whitelisted map in search_mod; the user input touches only `where_sql` via psycopg params.
+    # field names and operators in where_sql came from the parser's whitelist so no injection surface
+    rows_sql = (
+        f"SELECT {cfg['select_cols']} "
+        f"FROM {parsed.source} "
+        f"WHERE {cfg['timestamp_col']} > NOW() - INTERVAL '{interval_literal}' "
+        + (f"AND ({where_sql[6:]}) " if where_sql else "")
+        + f"ORDER BY {cfg['timestamp_col']} DESC LIMIT 200"
+    )
+    rows = query_all(rows_sql, tuple(where_params))
+
+    # event-count histogram bucketed by the window's natural granularity
+    hist_sql = (
+        f"SELECT date_trunc('minute', {cfg['timestamp_col']}) AS bucket, COUNT(*) AS n "
+        f"FROM {parsed.source} "
+        f"WHERE {cfg['timestamp_col']} > NOW() - INTERVAL '{interval_literal}' "
+        + (f"AND ({where_sql[6:]}) " if where_sql else "")
+        + "GROUP BY bucket ORDER BY bucket ASC"
+    )
+    hist_rows = query_all(hist_sql, tuple(where_params))
+    histogram_json = json.dumps([
+        {"t": (r["bucket"].isoformat() if r["bucket"] else ""), "n": int(r["n"])}
+        for r in hist_rows
+    ])
+
+    # total matching rows in the window (separate count to avoid limiting it to the 200-row display)
+    count_sql = (
+        f"SELECT COUNT(*) AS n FROM {parsed.source} "
+        f"WHERE {cfg['timestamp_col']} > NOW() - INTERVAL '{interval_literal}' "
+        + (f"AND ({where_sql[6:]}) " if where_sql else "")
+    )
+    total = query_one(count_sql, tuple(where_params)) or {"n": 0}
+
+    # drilldown helper: for any field=value cell in the results table, build a new search URL that
+    # appends "field=value" to the current expression. lets you click your way through events the
+    # way splunk does — same conceptual workflow, smaller surface
+    def drilldown(field: str, value: object) -> str:
+        if value is None: return ""
+        token = f'{field}="{value}"' if " " in str(value) else f"{field}={value}"
+        new_q = (q + " " + token).strip() if q else token
+        from urllib.parse import urlencode
+        return "/search?" + urlencode({"q": new_q})
+
+    return render_template(
+        "search.html",
+        q=q,
+        parsed_source=parsed.source,
+        parsed_window=window,
+        parsed_errors=parsed.errors,
+        rows=rows,
+        total_count=int(total.get("n", 0)),
+        histogram_json=histogram_json,
+        sources=list(search_mod.SOURCE_CONFIG.keys()),
+        drilldown=drilldown,
+    )
 
 
 @app.route("/network")

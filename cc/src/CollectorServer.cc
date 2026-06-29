@@ -377,6 +377,7 @@ namespace NodeMonitor
         out["totals"]["successes"] = m_snmp->total_successes();
         out["totals"]["timeouts"]  = m_snmp->total_timeouts();
         out["totals"]["errors"]    = m_snmp->total_errors();
+        out["discovery_mode"]      = m_snmp->discovery_mode();
 
         ::nlohmann::json agents_arr = ::nlohmann::json::array();
         for (const auto& s : m_snmp->snapshot())

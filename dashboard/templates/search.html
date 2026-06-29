@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}search · node-monitor{% endblock %}
+
+{% block content %}
+
+<form method="GET" action="/search" class="mb-4">
+    <div class="input-group input-group-lg">
+        <span class="input-group-text bg-dark text-light fw-bold">›_</span>
+        <input
+            type="text"
+            name="q"
+            value="{{ q }}"
+            class="form-control font-monospace"
+            placeholder='try:  severity=critical  rule_name=high_cpu  hostname=ciscopod-router1  last=24h  source=flows'
+            autofocus>
+        <button class="btn btn-dark" type="submit">search</button>
+    </div>
+    <div class="small text-secondary mt-2">
+        syntax — <code>field=value</code>, <code>field!=value</code>, <code>field&gt;N</code>, <code>field&lt;N</code>, free-text terms (ILIKE match);
+        meta — <code>source=incidents|metrics|flows|actions</code>, <code>last=15m|1h|6h|24h</code>.
+        current source <span class="badge bg-secondary">{{ parsed_source }}</span>
+        window <span class="badge bg-secondary">{{ parsed_window }}</span>
+        results <span class="badge bg-info text-dark">{{ "{:,}".format(total_count) }}</span>
+    </div>
+    {% if parsed_errors %}
+        <div class="alert alert-warning small mt-2 mb-0">
+            {% for e in parsed_errors %}<div>parse warning: {{ e }}</div>{% endfor %}
+        </div>
+    {% endif %}
+</form>
+
+<div class="card mb-4">
+    <div class="card-header small text-secondary">event count over time</div>
+    <div class="card-body" style="height: 180px;">
+        <canvas id="hist-chart"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header fw-semibold d-flex justify-content-between">
+        <span>{{ parsed_source }} (most recent first, capped at 200)</span>
+        <span class="small text-secondary">click any value to drill into it</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead><tr>
+                {% if parsed_source == 'incidents' %}
+                    <th>fired_at</th><th>rule</th><th>host</th><th>severity</th><th>status</th><th>details</th>
+                {% elif parsed_source == 'metrics' %}
+                    <th>ts</th><th>host</th><th>vendor</th><th>cpu</th><th>memory</th><th>health</th>
+                {% elif parsed_source == 'flows' %}
+                    <th>received</th><th>src</th><th>dst</th><th>dst_port</th><th>proto</th><th>bytes</th><th>acl</th>
+                {% elif parsed_source == 'actions' %}
+                    <th>started</th><th>runbook</th><th>rule</th><th>host</th><th>action</th><th>target</th><th>status</th>
+                {% endif %}
+            </tr></thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                {% if parsed_source == 'incidents' %}
+                    <td class="text-secondary small">{{ r.fired_at.strftime("%H:%M:%S") if r.fired_at else "" }}</td>
+                    <td><a href="{{ drilldown('rule_name', r.rule_name) }}"><code>{{ r.rule_name }}</code></a></td>
+                    <td><a href="{{ drilldown('hostname', r.hostname) }}">{{ r.hostname }}</a></td>
+                    <td><a href="{{ drilldown('severity', r.severity) }}"><span class="badge {{ severity_class.get(r.severity, 'bg-secondary') }}">{{ r.severity }}</span></a></td>
+                    <td>
+                        {% if r.resolved_at %}<span class="text-success small">resolved</span>
+                        {% else %}<span class="text-danger small">active</span>{% endif %}
+                    </td>
+                    <td class="small text-secondary">{{ (r.details.description if r.details and r.details.description else (r.details|string)[:120]) if r.details else "" }}</td>
+                {% elif parsed_source == 'metrics' %}
+                    <td class="text-secondary small">{{ r.ts.strftime("%H:%M:%S") if r.ts else "" }}</td>
+                    <td><a href="{{ drilldown('hostname', r.hostname) }}">{{ r.hostname }}</a></td>
+                    <td><a href="{{ drilldown('vendor', r.vendor) }}">{{ r.vendor }}</a></td>
+                    <td class="text-end">{{ "{:.1f}".format(r.cpu) }}</td>
+                    <td class="text-end">{{ "{:.1f}".format(r.memory) }}</td>
+                    <td><span class="badge {{ health_class.get(r.health_status, 'bg-secondary') }}">{{ r.health_status or "" }}</span></td>
+                {% elif parsed_source == 'flows' %}
+                    <td class="text-secondary small">{{ r.received_at.strftime("%H:%M:%S") if r.received_at else "" }}</td>
+                    <td><a href="{{ drilldown('src_ip', r.src_ip) }}"><code>{{ r.src_ip }}</code></a></td>
+                    <td><a href="{{ drilldown('dst_ip', r.dst_ip) }}"><code>{{ r.dst_ip }}</code></a></td>
+                    <td><a href="{{ drilldown('dst_port', r.dst_port) }}">{{ r.dst_port }}</a></td>
+                    <td><a href="{{ drilldown('protocol', r.protocol) }}">{{ r.protocol }}</a></td>
+                    <td class="text-end">{{ "{:,}".format(r.bytes or 0) }}</td>
+                    <td>
+                        {% if r.acl_action == 'permit' %}<span class="badge bg-success">permit</span>
+                        {% elif r.acl_action == 'deny' %}<span class="badge bg-danger">deny</span>
+                        {% else %}<span class="text-secondary small">—</span>{% endif %}
+                    </td>
+                {% elif parsed_source == 'actions' %}
+                    <td class="text-secondary small">{{ r.started_at.strftime("%H:%M:%S") if r.started_at else "" }}</td>
+                    <td><a href="{{ drilldown('runbook_name', r.runbook_name) }}">{{ r.runbook_name }}</a></td>
+                    <td><a href="{{ drilldown('rule_name', r.rule_name) }}">{{ r.rule_name }}</a></td>
+                    <td><a href="{{ drilldown('hostname', r.hostname) }}">{{ r.hostname }}</a></td>
+                    <td><a href="{{ drilldown('action_type', r.action_type) }}">{{ r.action_type }}</a></td>
+                    <td class="small text-secondary">{{ r.target }}</td>
+                    <td><a href="{{ drilldown('status', r.status) }}">
+                        {% if r.status == 'success' %}<span class="badge bg-success">success</span>
+                        {% elif r.status == 'failed' %}<span class="badge bg-danger">failed</span>
+                        {% else %}<span class="badge bg-secondary">{{ r.status }}</span>{% endif %}
+                    </a></td>
+                {% endif %}
+                </tr>
+            {% else %}
+                <tr><td colspan="7" class="text-secondary text-center py-3">no matches — try widening the time window or simplifying the query</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const hist = {{ histogram_json | safe }};
+        const labels = hist.map(b => b.t.slice(11, 16));
+        const counts = hist.map(b => b.n);
+
+        const ctx = document.getElementById("hist-chart").getContext("2d");
+        new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [{ label: "events", data: counts, backgroundColor: "#0d6efd" }],
+            },
+            options: {
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { ticks: { autoSkip: true, maxTicksLimit: 12 } }, y: { beginAtZero: true } },
+            },
+        });
+    })();
+</script>
+{% endblock %}

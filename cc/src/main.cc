@@ -162,7 +162,7 @@ int main()
                             try { port = static_cast<std::uint16_t>(std::stoi(entry.substr(colon + 1uz))); } catch (...) { port = 161; }
                         }
                         snmp->add_target(host, port, community);
-                        std::println("snmp poller target {}:{}", host, port);
+                        std::println("snmp poller static target {}:{}", host, port);
                     }
                     start = i + 1uz;
                 }
@@ -183,6 +183,21 @@ int main()
 
     // detect kubernetes credentials (dry-run when not in-cluster); shared with every Action via ActionContext
     std::shared_ptr<nm::K8sClient> k8s { nm::K8sClient::create_from_environment() };
+
+    // when running in-cluster, turn on k8s-API-based discovery so the snmp poller picks up simulator
+    // pods automatically instead of relying only on the static SNMP_TARGETS env. dry-run mode (docker
+    // compose / local dev) silently no-ops and the static targets remain authoritative
+    if (k8s && !k8s->is_dry_run())
+    {
+        std::string label { "app=simulator" };
+        if (const char* l { std::getenv("SNMP_DISCOVERY_LABEL") }; l != nullptr) label = l;
+        std::string ns { "default" };
+        if (const char* n { std::getenv("SNMP_DISCOVERY_NAMESPACE") }; n != nullptr) ns = n;
+        std::string community { "public" };
+        if (const char* c { std::getenv("SNMP_COMMUNITY") }; c != nullptr) community = c;
+        snmp->enable_k8s_discovery(k8s, ns, label, 161u, community);
+        std::println("snmp poller k8s discovery enabled: ns={} selector='{}'", ns, label);
+    }
 
     // construct the self-healing engine and register runbooks; each runbook binds one rule to an action list
     auto runbooks { std::make_shared<nm::RunbookEngine>(k8s, store) };
