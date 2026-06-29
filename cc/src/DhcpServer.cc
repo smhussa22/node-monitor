@@ -82,6 +82,37 @@ namespace NodeMonitor
     {
 
         if (m_running.exchange(true)) return;
+
+        // bind the udp socket synchronously *before* spawning the receive thread. previously the
+        // socket was created inside receive_loop, leaving a window where stop() could run before
+        // m_socket was populated and ::shutdown() would silently do nothing, leaving recvfrom blocked
+        int fd { ::socket(AF_INET, SOCK_DGRAM, 0) };
+        if (fd < 0)
+        {
+            std::println("error: failed to create dhcp udp socket");
+            m_running.store(false);
+            return;
+        }
+
+        int reuse { 1 };
+        ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+        ::sockaddr_in addr { };
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = ::htonl(INADDR_ANY);
+        addr.sin_port = ::htons(m_port);
+
+        if (::bind(fd, reinterpret_cast<::sockaddr*>(&addr), sizeof(addr)) < 0)
+        {
+            std::println("error: failed to bind dhcp socket to port {}", m_port);
+            ::close(fd);
+            m_running.store(false);
+            return;
+        }
+
+        m_socket.reset(fd);
+        std::println("dhcp server listening on udp port {}", m_port);
+
         m_receive_thread = std::thread { [this] { receive_loop(); } };
         m_reaper_thread = std::thread { [this] { reaper_loop(); } };
 
@@ -208,36 +239,12 @@ namespace NodeMonitor
     void DhcpServer::receive_loop()
     {
 
-        // create + bind the udp socket; we listen on all interfaces because the unicast destination
-        // will be our pod's clusterip and we don't want to enumerate that here
-        int fd { ::socket(AF_INET, SOCK_DGRAM, 0) };
-        if (fd < 0)
-        {
-            std::println("error: failed to create dhcp udp socket");
-            m_running.store(false);
-            return;
-        }
+        // socket bind is done in start() so stop() can always shutdown() it cleanly; here we just
+        // service incoming packets until m_running flips false. dhcp packets are tiny so a 2 KiB
+        // buffer is comfortable for the 300-ish-byte typical payload
+        int fd { m_socket.get() };
+        if (fd < 0) return;
 
-        int reuse { 1 };
-        ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-
-        ::sockaddr_in addr { };
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = ::htonl(INADDR_ANY);
-        addr.sin_port = ::htons(m_port);
-
-        if (::bind(fd, reinterpret_cast<::sockaddr*>(&addr), sizeof(addr)) < 0)
-        {
-            std::println("error: failed to bind dhcp socket to port {}", m_port);
-            ::close(fd);
-            m_running.store(false);
-            return;
-        }
-
-        m_socket.reset(fd);
-        std::println("dhcp server listening on udp port {}", m_port);
-
-        // dhcp packets are tiny; a 2 kib buffer is comfortable for the 300-ish-byte typical packet
         std::uint8_t buffer[2048] { };
         while (m_running.load())
         {

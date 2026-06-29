@@ -38,6 +38,36 @@ namespace NodeMonitor
     {
 
         if (m_running.exchange(true)) return;
+
+        // bind synchronously before spawning the receive thread so stop() can always observe a valid
+        // m_socket and ::shutdown() it to unblock recvfrom
+        int fd { ::socket(AF_INET, SOCK_DGRAM, 0) };
+        if (fd < 0)
+        {
+            std::println("error: failed to create dns udp socket");
+            m_running.store(false);
+            return;
+        }
+
+        int reuse { 1 };
+        ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+        ::sockaddr_in addr { };
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = ::htonl(INADDR_ANY);
+        addr.sin_port = ::htons(m_port);
+
+        if (::bind(fd, reinterpret_cast<::sockaddr*>(&addr), sizeof(addr)) < 0)
+        {
+            std::println("error: failed to bind dns socket to port {}", m_port);
+            ::close(fd);
+            m_running.store(false);
+            return;
+        }
+
+        m_socket.reset(fd);
+        std::println("dns server listening on udp port {} (zone {})", m_port, m_zone ? m_zone->suffix() : std::string { "<none>" });
+
         m_thread = std::thread { [this] { receive_loop(); } };
 
     }
@@ -111,33 +141,9 @@ namespace NodeMonitor
     void DnsServer::receive_loop()
     {
 
-        // create + bind the udp socket; listen on all interfaces so any source ip reaches us
-        int fd { ::socket(AF_INET, SOCK_DGRAM, 0) };
-        if (fd < 0)
-        {
-            std::println("error: failed to create dns udp socket");
-            m_running.store(false);
-            return;
-        }
-
-        int reuse { 1 };
-        ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-
-        ::sockaddr_in addr { };
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = ::htonl(INADDR_ANY);
-        addr.sin_port = ::htons(m_port);
-
-        if (::bind(fd, reinterpret_cast<::sockaddr*>(&addr), sizeof(addr)) < 0)
-        {
-            std::println("error: failed to bind dns socket to port {}", m_port);
-            ::close(fd);
-            m_running.store(false);
-            return;
-        }
-
-        m_socket.reset(fd);
-        std::println("dns server listening on udp port {} (zone {})", m_port, m_zone ? m_zone->suffix() : std::string { "<none>" });
+        // socket bind is done in start() so stop() can always shutdown() it cleanly
+        int fd { m_socket.get() };
+        if (fd < 0) return;
 
         std::uint8_t buffer[2048] { };
         while (m_running.load())

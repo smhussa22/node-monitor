@@ -430,6 +430,11 @@ namespace NodeMonitor
             if (vb_out.m_value_tag == AsnBer::k_tag_end_of_mib_view) break;
             if (!AsnBer::is_descendant(vb_out.m_oid, root_oid) && AsnBer::compare_oids(vb_out.m_oid, root_oid) != 0) break;
 
+            // monotonic-progress guard: a well-behaved agent must return an OID strictly greater than
+            // what we asked for. anything else (same OID, prior OID) would loop us until max_steps;
+            // protect against that here so a buggy or hostile agent can't burn 64 RPCs per sweep
+            if (AsnBer::compare_oids(vb_out.m_oid, current) <= 0) break;
+
             out_vbs.push_back(vb_out);
             any_returned = true;
             current = vb_out.m_oid;

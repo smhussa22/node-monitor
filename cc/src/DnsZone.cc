@@ -58,9 +58,19 @@ namespace NodeMonitor
 
         std::lock_guard<std::mutex> lock { m_mutex };
 
-        // remove any prior owner of this ip so the reverse map stays consistent
+        // a stale forward entry from a *different* fqdn may already point at this ip (eg dhcp handed the
+        // same ip to a new device after a lease expired). drop that forward + source entry so we don't
+        // leave a dangling name pointing at the new owner's ip
+        auto stale_owner { m_reverse.find(ip) };
+        if (stale_owner != m_reverse.end() && stale_owner->second != fqdn)
+        {
+            m_forward.erase(stale_owner->second);
+            m_sources.erase(stale_owner->second);
+        }
+
+        // if this fqdn used to point at a different ip, clear the old reverse entry too
         auto existing_ip { m_forward.find(fqdn) };
-        if (existing_ip != m_forward.end()) m_reverse.erase(existing_ip->second);
+        if (existing_ip != m_forward.end() && existing_ip->second != ip) m_reverse.erase(existing_ip->second);
 
         m_forward[fqdn] = ip;
         m_reverse[ip] = fqdn;

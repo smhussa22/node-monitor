@@ -182,7 +182,9 @@ def _dec_tlv(data: bytes, offset: int) -> Optional[Tuple[int, int, int, int]]:
     return tag, value_offset, length, (value_offset + length - offset)
 
 
-# decode a signed integer body of given length at offset; sign-extends from the top bit
+# decode a signed integer body of given length at offset. seeds with -1 for negative values so the
+# shift+or loop naturally produces a correctly-signed python int via the language's arbitrary-precision
+# semantics — no post-mask required (an earlier version had one and double-negated already-signed values)
 def _dec_integer(data: bytes, offset: int, length: int) -> int:
 
     if length == 0:
@@ -190,9 +192,6 @@ def _dec_integer(data: bytes, offset: int, length: int) -> int:
     v = -1 if (data[offset] & 0x80) else 0
     for i in range(length):
         v = (v << 8) | data[offset + i]
-    # mask back to signed 64
-    if v & (1 << 63):
-        v -= (1 << 64)
     return v
 
 
