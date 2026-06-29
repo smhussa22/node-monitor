@@ -71,3 +71,11 @@ target_link_libraries(node_monitor PRIVATE node_monitor_lib)
 # so the runtime image stays small. build it explicitly with:  cmake --build build --target acl_bench
 add_executable(acl_bench EXCLUDE_FROM_ALL bench/acl_bench.cc)
 target_link_libraries(acl_bench PRIVATE node_monitor_lib)
+
+# dhcp_bench measures the in-process DORA exchange cost (decode + pool allocate + encode + lease append)
+add_executable(dhcp_bench EXCLUDE_FROM_ALL bench/dhcp_bench.cc)
+target_link_libraries(dhcp_bench PRIVATE node_monitor_lib)
+
+# dns_bench measures the in-process query cost (decode + zone lookup + encode) across a mix of A / AAAA / PTR / NXDOMAIN / REFUSED
+add_executable(dns_bench EXCLUDE_FROM_ALL bench/dns_bench.cc)
+target_link_libraries(dns_bench PRIVATE node_monitor_lib)
