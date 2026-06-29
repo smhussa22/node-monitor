@@ -80,3 +80,12 @@ target_link_libraries(dhcp_bench PRIVATE node_monitor_lib)
 # dns_bench measures the in-process query cost (decode + zone lookup + encode) across a mix of A / AAAA / PTR / NXDOMAIN / REFUSED
 add_executable(dns_bench EXCLUDE_FROM_ALL bench/dns_bench.cc)
 target_link_libraries(dns_bench PRIVATE node_monitor_lib)
+
+# dhcp_bench_wire measures DORA throughput over a real UDP socket on 127.0.0.1 — the headline number
+# the writeup leads with because it includes kernel syscall + scheduler overhead
+add_executable(dhcp_bench_wire EXCLUDE_FROM_ALL bench/dhcp_bench_wire.cc)
+target_link_libraries(dhcp_bench_wire PRIVATE node_monitor_lib)
+
+# dns_bench_wire measures DNS query throughput over a real UDP socket on 127.0.0.1
+add_executable(dns_bench_wire EXCLUDE_FROM_ALL bench/dns_bench_wire.cc)
+target_link_libraries(dns_bench_wire PRIVATE node_monitor_lib)
