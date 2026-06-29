@@ -2,6 +2,7 @@ import random
 import time
 import json
 import socket
+import struct
 import threading
 from dataclasses import dataclass, asdict
 from typing import Optional
@@ -39,6 +40,8 @@ class CiscoRouterSimulator:
         self.running: bool = False                          # whether the export loop is active
         self.thread: Optional[threading.Thread] = None      # background export thread
         self.netflow_socket: Optional[socket.socket] = None # udp socket used for netflow exports
+        self.netflow_boot_ms: int = int(time.monotonic() * 1000)  # exporter boot time for the sys_uptime field
+        self.netflow_seq: int = 0                           # monotonic flow_sequence; persists across calls
 
     # begin pushing metrics on a background thread
     def start(self) -> None:
@@ -84,27 +87,70 @@ class CiscoRouterSimulator:
         except requests.RequestException as e:
             print(f"[{self.hostname}] metric export failed: {e}")
 
-    # build a netflow record and push it to the collector over udp
+    # build a real NetFlow v5 datagram and push it to the collector over UDP. wire format per Cisco's
+    # original NetFlow v5 spec: 24-byte big-endian header + 48-byte big-endian flow records. one record
+    # per datagram is fine for a simulator; real routers batch up to 30 records per datagram
     def export_netflow(self) -> None:
 
         if self.netflow_socket is None: return
 
-        # build a randomized flow record matching the netflow schema in the project spec
-        record = {
-            "src_ip": f"10.0.0.{random.randint(1, 254)}",
-            "dst_ip": f"8.8.{random.randint(0, 255)}.{random.randint(1, 254)}",
-            "src_port": random.randint(1024, 65535),
-            "dst_port": random.choice([80, 443, 22, 53, 3389, 8080, random.randint(1024, 65535)]),
-            "protocol": random.choice(["TCP", "UDP", "ICMP"]),
-            "bytes": random.randint(1024, 500_000_000),
-            "duration": random.randint(1, 60),
-            "hostname": self.hostname,
-        }
+        # pick a randomized 5-tuple with the same port mix and protocol weighting as the json version
+        src_a, src_b, src_c, src_d = 10, 0, 0, random.randint(1, 254)
+        dst_a, dst_b, dst_c, dst_d = 8, random.randint(0, 255), random.randint(0, 255), random.randint(1, 254)
+        src_port = random.randint(1024, 65535)
+        dst_port = random.choice([80, 443, 22, 53, 3389, 8080, random.randint(1024, 65535)])
+        proto = random.choice([6, 17, 1])   # TCP / UDP / ICMP
+        octets = random.randint(1024, 500_000_000) & 0xFFFFFFFF
+        packets = random.randint(1, 100)
 
-        # send the record to the netflow collector
+        # timestamps in the header are seconds + nanos; per-flow first/last are sys_uptime ms relative to boot
+        now_ms = int(time.monotonic() * 1000) - self.netflow_boot_ms
+        duration_ms = random.randint(1000, 60_000)
+        first_ms = max(0, now_ms - duration_ms)
+        last_ms = now_ms
+        unix_secs = int(time.time())
+        unix_nsecs = int((time.time() % 1) * 1_000_000_000)
+
+        self.netflow_seq = (self.netflow_seq + 1) & 0xFFFFFFFF
+
+        # 24-byte header (network byte order). version=5, count=1, then timing + sequence + engine fields
+        header = struct.pack(
+            "!HHIIIIBBH",
+            5,              # version
+            1,              # count of records in this datagram
+            now_ms,         # sys_uptime
+            unix_secs,
+            unix_nsecs,
+            self.netflow_seq,
+            0,              # engine_type
+            0,              # engine_id
+            0,              # sampling_interval (mode + interval)
+        )
+
+        # 48-byte v5 record (network byte order)
+        src_addr = (src_a << 24) | (src_b << 16) | (src_c << 8) | src_d
+        dst_addr = (dst_a << 24) | (dst_b << 16) | (dst_c << 8) | dst_d
+        record = struct.pack(
+            "!IIIHHIIIIHHBBBBHHBBH",
+            src_addr,       # srcaddr
+            dst_addr,       # dstaddr
+            0,              # nexthop
+            0, 0,           # input, output ifindex
+            packets,        # dPkts
+            octets,         # dOctets
+            first_ms, last_ms,
+            src_port, dst_port,
+            0,              # pad1
+            0,              # tcp_flags
+            proto,          # protocol
+            0,              # tos
+            0, 0,           # src_as, dst_as
+            0, 0,           # src_mask, dst_mask
+            0,              # pad2
+        )
+
         try:
-            payload = json.dumps(record).encode("utf-8")
-            self.netflow_socket.sendto(payload, (self.netflow_host, self.netflow_port))
+            self.netflow_socket.sendto(header + record, (self.netflow_host, self.netflow_port))
         except OSError as e:
             print(f"[{self.hostname}] netflow export failed: {e}")
 

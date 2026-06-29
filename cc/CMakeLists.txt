@@ -54,6 +54,7 @@ set(LIB_SOURCES
     src/MetricCache.cc
     src/MetricStore.cc
     src/NetflowReceiver.cc
+    src/NetflowV5Packet.cc
     src/Rule.cc
     src/RunbookEngine.cc
     src/Scheduler.cc
