@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 // 3rd party headers
@@ -66,6 +67,11 @@ namespace NodeMonitor
         // per state transition) so the dashboard can chart DORA activity over time rather than just the
         // current binding. callers don't have to dedupe; the table is append-only
         void record_dhcp_lease(const DhcpLease& lease);
+
+        // find src_ips that fanned out across many distinct dst_ports in the window — the classic
+        // "horizontal scan" fingerprint. returns one row per offender with (src_ip, distinct_port_count).
+        // used by the PortScanRule to convert a flow-pattern query into per-host alert triggers
+        std::vector<std::pair<std::string, std::uint32_t>> find_port_scan_sources(std::chrono::seconds window, std::uint32_t min_distinct_ports);
 
         // total rows ever persisted via this process (useful for smoke tests)
         std::uint64_t insert_count() const noexcept;

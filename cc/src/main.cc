@@ -30,8 +30,10 @@
 #include "DhcpPacket.hh"
 #include "DhcpPool.hh"
 #include "DhcpServer.hh"
+#include "DnsNxdomainRule.hh"
 #include "DnsServer.hh"
 #include "DnsZone.hh"
+#include "PortScanRule.hh"
 #include "SnmpPoller.hh"
 #include "SnmpTrapReceiver.hh"
 #include "K8sClient.hh"
@@ -260,6 +262,14 @@ int main()
     // operational signal: fires when fewer than 10% of the dhcp pool's addresses are free; gives an
     // operator advance warning before clients start failing to bind
     alerts->register_rule(std::make_unique<nm::DhcpExhaustionRule>("dhcp_pool_exhaustion", 0.10, 60s, "warning", dhcp));
+
+    // operational + security signal: nxdomain bursts often indicate either a misconfigured client or a
+    // zone-enumeration scan against our DnsServer; threshold is per-second
+    alerts->register_rule(std::make_unique<nm::DnsNxdomainRule>("dns_nxdomain_storm", 10.0, 30s, "warning", dns));
+
+    // security signal: classic horizontal scan fingerprint — one src_ip hitting many distinct dst_ports
+    // in a short window. queries the flows table which is already populated by NetflowReceiver
+    alerts->register_rule(std::make_unique<nm::PortScanRule>("port_scan_detected", 50u, 60s, 0s, "warning"));
 
     // schedule a periodic snapshot of the cache and print one line per device
     scheduler.schedule([cache]

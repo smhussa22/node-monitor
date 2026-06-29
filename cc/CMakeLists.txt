@@ -41,9 +41,11 @@ set(LIB_SOURCES
     src/DhcpPool.cc
     src/DhcpServer.cc
     src/AsnBer.cc
+    src/DnsNxdomainRule.cc
     src/DnsPacket.cc
     src/DnsServer.cc
     src/DnsZone.cc
+    src/PortScanRule.cc
     src/SnmpMessage.cc
     src/SnmpPoller.cc
     src/SnmpTrapReceiver.cc

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <vector>
 
 // 3rd party headers
 
@@ -91,6 +92,26 @@ namespace NodeMonitor
         auto it { m_forward.find(key) };
         if (it == m_forward.end()) return std::nullopt;
         return it->second;
+
+    }
+
+    std::optional<std::vector<std::uint8_t>> DnsZone::lookup_aaaa(const std::string& fqdn) const
+    {
+
+        auto ip { lookup_a(fqdn) };
+        if (!ip.has_value()) return std::nullopt;
+
+        // IPv4-mapped IPv6 layout: 80 bits of zero, 16 bits of 0xFF, then the 32-bit IPv4 address
+        std::vector<std::uint8_t> rdata { };
+        rdata.reserve(16uz);
+        for (std::size_t i { 0uz }; i < 10uz; ++i) rdata.push_back(0u);
+        rdata.push_back(0xFFu);
+        rdata.push_back(0xFFu);
+        rdata.push_back(static_cast<std::uint8_t>((*ip >> 24) & 0xFFu));
+        rdata.push_back(static_cast<std::uint8_t>((*ip >> 16) & 0xFFu));
+        rdata.push_back(static_cast<std::uint8_t>((*ip >> 8) & 0xFFu));
+        rdata.push_back(static_cast<std::uint8_t>(*ip & 0xFFu));
+        return rdata;
 
     }
 

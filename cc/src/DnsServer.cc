@@ -240,6 +240,29 @@ namespace NodeMonitor
                 return out;
 
             }
+            case DnsType::AAAA:
+            {
+
+                auto rdata { m_zone->lookup_aaaa(question.m_name) };
+                if (!rdata.has_value())
+                {
+                    set_rcode(out.m_header, DnsRcode::NxDomain);
+                    m_nxdomain.fetch_add(1uz, std::memory_order_relaxed);
+                    return out;
+                }
+
+                DnsRR ans { };
+                ans.m_name = question.m_name;
+                ans.m_type = DnsType::AAAA;
+                ans.m_class = DnsClass::IN;
+                ans.m_ttl = 60u;
+                ans.m_rdata = std::move(*rdata);
+                out.m_answers.push_back(std::move(ans));
+                set_rcode(out.m_header, DnsRcode::NoError);
+                m_noerror.fetch_add(1uz, std::memory_order_relaxed);
+                return out;
+
+            }
             case DnsType::PTR:
             {
 

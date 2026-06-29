@@ -138,6 +138,42 @@ namespace NodeMonitor
 
     }
 
+    std::vector<std::pair<std::string, std::uint32_t>> MetricStore::find_port_scan_sources(std::chrono::seconds window, std::uint32_t min_distinct_ports)
+    {
+
+        std::vector<std::pair<std::string, std::uint32_t>> out { };
+        auto conn { acquire_connection() };
+        try
+        {
+            ::pqxx::work tx { *conn };
+            // count distinct dst_ports per src_ip in the window; only return rows that breach the threshold
+            auto rows { tx.exec(
+                "SELECT src_ip, COUNT(DISTINCT dst_port) AS port_count "
+                "FROM flows "
+                "WHERE received_at > NOW() - make_interval(secs => $1) "
+                "  AND dst_port IS NOT NULL "
+                "GROUP BY src_ip "
+                "HAVING COUNT(DISTINCT dst_port) >= $2 "
+                "ORDER BY port_count DESC LIMIT 100",
+                ::pqxx::params { static_cast<int>(window.count()), static_cast<int>(min_distinct_ports) }
+            ) };
+            for (const auto& row : rows)
+            {
+                std::string ip { row[0].as<std::string>() };
+                std::uint32_t n { static_cast<std::uint32_t>(row[1].as<long>()) };
+                out.emplace_back(std::move(ip), n);
+            }
+            tx.commit();
+        }
+        catch (const std::exception& e)
+        {
+            std::println("error: port scan query failed: {}", e.what());
+        }
+        release_connection(std::move(conn));
+        return out;
+
+    }
+
     void MetricStore::record_dhcp_lease(const DhcpLease& lease)
     {
 

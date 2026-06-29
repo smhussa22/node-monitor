@@ -60,6 +60,12 @@ namespace NodeMonitor
         // not bound
         std::optional<std::uint32_t> lookup_a(const std::string& fqdn) const;
 
+        // AAAA lookup: synthesizes an IPv4-mapped IPv6 address (::ffff:a.b.c.d, RFC 4291 §2.5.5.2) from
+        // the bound IPv4 entry. returns the 16-byte rdata ready to drop into a DnsRR, or nullopt when the
+        // host has no A binding. avoids us having to maintain a parallel IPv6 map — every device that
+        // joins the zone via DHCP gets a corresponding AAAA for free
+        std::optional<std::vector<std::uint8_t>> lookup_aaaa(const std::string& fqdn) const;
+
         // reverse lookup: given a "<reversed-octets>.in-addr.arpa" name, return the fqdn that owns the ip
         std::optional<std::string> lookup_ptr(const std::string& arpa_name) const;
 
