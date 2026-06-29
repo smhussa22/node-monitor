@@ -1,0 +1,158 @@
+# two FRR routing daemons running in the cluster, peering with each other via real eBGP between
+# AS 65001 and AS 65002. each Deployment has 1 replica with a dedicated headless Service that
+# returns the pod's actual IP (clusterIP: None bypasses the kube-proxy NAT that would otherwise
+# rewrite the source address and confuse BGP). the collector polls bgp peer state by reading the
+# metric posts emitted by the bgp_scraper sidecar inside each FRR pod
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frr-router-1
+  labels:
+    app: frr-router
+    instance: frr1
+spec:
+  clusterIP: None  # headless — DNS returns the pod IP, no NAT
+  selector:
+    app: frr-router
+    instance: frr1
+  ports:
+    - name: bgp
+      port: 179
+      targetPort: 179
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frr-router-2
+  labels:
+    app: frr-router
+    instance: frr2
+spec:
+  clusterIP: None
+  selector:
+    app: frr-router
+    instance: frr2
+  ports:
+    - name: bgp
+      port: 179
+      targetPort: 179
+      protocol: TCP
+---
+# frr-router-1: AS 65001, peers with frr-router-2.default.svc.cluster.local
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frr-router-1
+  labels:
+    app: frr-router
+    instance: frr1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frr-router
+      instance: frr1
+  template:
+    metadata:
+      labels:
+        app: frr-router
+        instance: frr1
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: frr
+          image: node-monitor-frr:latest
+          imagePullPolicy: IfNotPresent
+          # FRR needs NET_ADMIN to manage routes and route tables; NET_RAW for the routing-socket plumbing
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]
+          env:
+            - name: FRR_HOSTNAME
+              value: "frr1"
+            - name: COLLECTOR_URL
+              value: "http://collector:8000/"
+            - name: BGP_SCRAPE_INTERVAL
+              value: "15"
+            - name: LOCAL_AS
+              value: "65001"
+            - name: PEER_AS
+              value: "65002"
+            # headless Service DNS returns the actual pod IP — start.sh resolves this at boot
+            - name: PEER_HOST
+              value: "frr-router-2.default.svc.cluster.local"
+            - name: PEER_DESC
+              value: "peer-frr2"
+            - name: ADVERTISE_PREFIX
+              value: "10.10.10.0/24"
+            # ROUTER_ID is intentionally unset — start.sh defaults to the pod's IP via "hostname -i"
+          ports:
+            - name: bgp
+              containerPort: 179
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+# frr-router-2: AS 65002, peers with frr-router-1.default.svc.cluster.local
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frr-router-2
+  labels:
+    app: frr-router
+    instance: frr2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frr-router
+      instance: frr2
+  template:
+    metadata:
+      labels:
+        app: frr-router
+        instance: frr2
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: frr
+          image: node-monitor-frr:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]
+          env:
+            - name: FRR_HOSTNAME
+              value: "frr2"
+            - name: COLLECTOR_URL
+              value: "http://collector:8000/"
+            - name: BGP_SCRAPE_INTERVAL
+              value: "15"
+            - name: LOCAL_AS
+              value: "65002"
+            - name: PEER_AS
+              value: "65001"
+            - name: PEER_HOST
+              value: "frr-router-1.default.svc.cluster.local"
+            - name: PEER_DESC
+              value: "peer-frr1"
+            - name: ADVERTISE_PREFIX
+              value: "10.20.20.0/24"
+          ports:
+            - name: bgp
+              containerPort: 179
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"

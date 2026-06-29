@@ -128,8 +128,12 @@ services:
       FRR_HOSTNAME: "frr1"
       COLLECTOR_URL: "http://collector:8000/"
       BGP_SCRAPE_INTERVAL: "15"
-    volumes:
-      - ./k8s/frr/frr1.conf:/etc/frr/frr.conf:ro
+      LOCAL_AS: "65001"
+      PEER_AS: "65002"
+      PEER_HOST: "172.20.0.11"
+      PEER_DESC: "peer-frr2"
+      ROUTER_ID: "172.20.0.10"
+      ADVERTISE_PREFIX: "10.10.10.0/24"
     networks:
       frrnet:
         ipv4_address: 172.20.0.10
@@ -147,8 +151,12 @@ services:
       FRR_HOSTNAME: "frr2"
       COLLECTOR_URL: "http://collector:8000/"
       BGP_SCRAPE_INTERVAL: "15"
-    volumes:
-      - ./k8s/frr/frr2.conf:/etc/frr/frr.conf:ro
+      LOCAL_AS: "65002"
+      PEER_AS: "65001"
+      PEER_HOST: "172.20.0.10"
+      PEER_DESC: "peer-frr1"
+      ROUTER_ID: "172.20.0.11"
+      ADVERTISE_PREFIX: "10.20.20.0/24"
     networks:
       frrnet:
         ipv4_address: 172.20.0.11

@@ -73,12 +73,13 @@ kubectl apply -f k8s/cluster-autoscaler.yaml
 # rewrite image references in our manifests on the fly so they pick up the ECR URI when present
 TMP=$(mktemp -d)
 trap "rm -rf $TMP" EXIT
-for f in k8s/collector.yaml k8s/dashboard.yaml k8s/simulator-cisco.yaml k8s/simulator-juniper.yaml k8s/simulator-paloalto.yaml; do
+for f in k8s/collector.yaml k8s/dashboard.yaml k8s/simulator-cisco.yaml k8s/simulator-juniper.yaml k8s/simulator-paloalto.yaml k8s/frr.yaml; do
     out="$TMP/$(basename "$f")"
     if [ -n "$REGISTRY" ]; then
         sed -e "s|image: node-monitor-collector:latest|image: ${REGISTRY}/node-monitor-collector:latest|g" \
             -e "s|image: node-monitor-simulator:latest|image: ${REGISTRY}/node-monitor-simulator:latest|g" \
             -e "s|image: node-monitor-dashboard:latest|image: ${REGISTRY}/node-monitor-dashboard:latest|g" \
+            -e "s|image: node-monitor-frr:latest|image: ${REGISTRY}/node-monitor-frr:latest|g" \
             "$f" > "$out"
     else
         cp "$f" "$out"
@@ -93,6 +94,7 @@ kubectl apply -f "$TMP/dashboard.yaml"
 kubectl apply -f "$TMP/simulator-cisco.yaml"
 kubectl apply -f "$TMP/simulator-juniper.yaml"
 kubectl apply -f "$TMP/simulator-paloalto.yaml"
+kubectl apply -f "$TMP/frr.yaml"
 
 echo ">>> waiting for collector, dashboard, and postgres to become ready"
 kubectl rollout status deployment/collector --timeout=5m

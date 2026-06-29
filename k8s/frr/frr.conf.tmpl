@@ -1,0 +1,23 @@
+! FRR config template — placeholders are substituted by start.sh at container boot using env vars.
+! a single template covers both docker-compose (static IP peer) and kubernetes (dns-resolved pod IP)
+! deployments without needing distinct config files per pod
+!
+hostname __HOSTNAME__
+log stdout
+!
+router bgp __LOCAL_AS__
+ bgp router-id __ROUTER_ID__
+ no bgp ebgp-requires-policy
+ neighbor __PEER_IP__ remote-as __PEER_AS__
+ neighbor __PEER_IP__ description __PEER_DESC__
+ !
+ address-family ipv4 unicast
+  network __ADVERTISE_PREFIX__
+  neighbor __PEER_IP__ activate
+  neighbor __PEER_IP__ soft-reconfiguration inbound
+ exit-address-family
+!
+ip route __ADVERTISE_PREFIX__ Null0
+!
+line vty
+!

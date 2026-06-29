@@ -1,6 +1,7 @@
 #!/bin/bash
-# CAN BE RAN WITH ./push-to-ecr.sh to build all three images and push them to ECR.
-# expects: aws cli configured, docker, jq (optional). on success prints the REGISTRY env you should pass to up.sh.
+# CAN BE RAN WITH ./push-to-ecr.sh to build all four images and push them to ECR.
+# (collector, simulator, dashboard, frr). expects: aws cli configured, docker, jq (optional).
+# on success prints the REGISTRY env you should pass to up.sh.
 
 set -euo pipefail
 
@@ -9,7 +10,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
 
 REGION="${AWS_REGION:-us-east-1}"
-REPOS=(node-monitor-collector node-monitor-simulator node-monitor-dashboard)
+REPOS=(node-monitor-collector node-monitor-simulator node-monitor-dashboard node-monitor-frr)
 
 # verify aws cli is reachable and credentials exist
 if ! command -v aws >/dev/null 2>&1; then
@@ -47,6 +48,7 @@ echo ">>> building images"
 docker build -t node-monitor-collector:latest -f cc/Dockerfile cc/
 docker build -t node-monitor-simulator:latest -f python/Dockerfile python/
 docker build -t node-monitor-dashboard:latest -f dashboard/Dockerfile dashboard/
+docker build -t node-monitor-frr:latest -f k8s/frr/Dockerfile k8s/frr/
 
 for repo in "${REPOS[@]}"; do
     echo ">>> pushing $repo"
