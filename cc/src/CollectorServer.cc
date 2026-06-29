@@ -25,8 +25,8 @@
 namespace NodeMonitor
 {
 
-    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl, std::shared_ptr<DhcpServer> dhcp, std::shared_ptr<DnsServer> dns, std::shared_ptr<DnsZone> dns_zone, std::shared_ptr<SnmpPoller> snmp)
-        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_dhcp { std::move(dhcp) }, m_dns { std::move(dns) }, m_dns_zone { std::move(dns_zone) }, m_snmp { std::move(snmp) }, m_port { port }
+    CollectorServer::CollectorServer(std::shared_ptr<MetricCache> cache, std::shared_ptr<MetricStore> store, std::shared_ptr<ThreadPool> pool, std::uint16_t port, std::shared_ptr<AclEngine> acl, std::shared_ptr<DhcpServer> dhcp, std::shared_ptr<DnsServer> dns, std::shared_ptr<DnsZone> dns_zone, std::shared_ptr<SnmpPoller> snmp, std::shared_ptr<SnmpTrapReceiver> traps)
+        : m_cache { cache }, m_store { store }, m_pool { pool }, m_acl { std::move(acl) }, m_dhcp { std::move(dhcp) }, m_dns { std::move(dns) }, m_dns_zone { std::move(dns_zone) }, m_snmp { std::move(snmp) }, m_snmp_traps { std::move(traps) }, m_port { port }
     {
 
     }
@@ -210,6 +210,9 @@ namespace NodeMonitor
         // GET /snmp/agents returns the snmp poller's per-target state
         if (method == "GET" && path == "/snmp/agents") return build_response(200, "OK", "application/json", snmp_snapshot_json());
 
+        // GET /snmp/traps returns recent notification PDUs received on udp/162
+        if (method == "GET" && path == "/snmp/traps") return build_response(200, "OK", "application/json", snmp_traps_json());
+
         // GET /healthz is a cheap liveness probe; no db touch, no acl touch
         if (method == "GET" && path == "/healthz") return build_response(200, "OK", "application/json", "{\"ok\":true}");
 
@@ -391,9 +394,53 @@ namespace NodeMonitor
             a["uptime_ticks"] = s.m_last_uptime_ticks;
             a["cpu"] = s.m_last_cpu;
             a["memory"] = s.m_last_memory;
+            a["walk_steps"] = s.m_last_walk_steps;
+
+            ::nlohmann::json ifs_arr = ::nlohmann::json::array();
+            for (const auto& row : s.m_interfaces)
+            {
+                ::nlohmann::json r { };
+                r["ifIndex"] = row.m_index;
+                r["ifDescr"] = row.m_descr;
+                r["ifAdminStatus"] = row.m_admin_status;
+                r["ifOperStatus"] = row.m_oper_status;
+                r["ifInOctets"] = row.m_in_octets;
+                r["ifOutOctets"] = row.m_out_octets;
+                ifs_arr.push_back(r);
+            }
+            a["interfaces"] = ifs_arr;
+
             agents_arr.push_back(a);
         }
         out["agents"] = agents_arr;
+
+        return out.dump();
+
+    }
+
+    std::string CollectorServer::snmp_traps_json() const
+    {
+
+        if (!m_snmp_traps)
+            return std::string { "{\"totals\":{\"received\":0,\"dropped\":0},\"traps\":[]}" };
+
+        ::nlohmann::json out { };
+        out["totals"]["received"] = m_snmp_traps->received_count();
+        out["totals"]["dropped"]  = m_snmp_traps->dropped_count();
+
+        ::nlohmann::json traps_arr = ::nlohmann::json::array();
+        for (const auto& t : m_snmp_traps->snapshot())
+        {
+            ::nlohmann::json r { };
+            r["received_epoch"] = std::chrono::duration<double>(t.m_received_at.time_since_epoch()).count();
+            r["source_ip"] = t.m_source_ip;
+            r["community"] = t.m_community;
+            r["uptime_ticks"] = t.m_uptime_ticks;
+            r["event_oid"] = t.m_event_oid;
+            r["extras"] = t.m_extras_str;
+            traps_arr.push_back(r);
+        }
+        out["traps"] = traps_arr;
 
         return out.dump();
 

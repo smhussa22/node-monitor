@@ -63,6 +63,10 @@ spec:
               value: "collector"
             - name: DNS_SERVER
               value: "collector"
+            - name: SNMP_TRAP_TARGET
+              value: "collector:162"
+            - name: SNMP_TRAP_INTERVAL
+              value: "30"
           args:
             - "--vendor=cisco"
             - "--count=100"

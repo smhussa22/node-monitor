@@ -46,6 +46,7 @@ set(LIB_SOURCES
     src/DnsZone.cc
     src/SnmpMessage.cc
     src/SnmpPoller.cc
+    src/SnmpTrapReceiver.cc
     src/K8sClient.cc
     src/MetricCache.cc
     src/MetricStore.cc

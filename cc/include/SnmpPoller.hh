@@ -2,8 +2,10 @@
 #define NODE_MONITOR_SNMP_POLLER_HH
 
 // related headers
+#include "AsnBer.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
+#include "SnmpMessage.hh"
 
 // c sys headers
 
@@ -26,6 +28,19 @@
 namespace NodeMonitor
 {
 
+    // one row of the IF-MIB ifTable; assembled by grouping a GETNEXT-driven walk's varbinds by index
+    struct SnmpIfRow
+    {
+
+        std::uint32_t m_index { 0 };          // ifIndex (column 1)
+        std::string m_descr { };              // ifDescr (column 2)
+        std::uint32_t m_admin_status { 0 };   // ifAdminStatus (column 7); 1=up 2=down 3=testing
+        std::uint32_t m_oper_status { 0 };    // ifOperStatus (column 8); same enum
+        std::uint64_t m_in_octets { 0 };      // ifInOctets (column 10)
+        std::uint64_t m_out_octets { 0 };     // ifOutOctets (column 16)
+
+    };
+
     // per-target wire counters + the last decoded values for the dashboard. all rolled together rather
     // than split into per-counter atomics because the poller mutates everything under m_mutex anyway
     struct SnmpTargetState
@@ -44,6 +59,9 @@ namespace NodeMonitor
         std::uint32_t m_last_uptime_ticks { 0 };              // most recent sysUpTime.0 in hundredths of a sec
         std::uint32_t m_last_cpu { 0 };                       // enterprise OID cpu percent (last value)
         std::uint32_t m_last_memory { 0 };                    // enterprise OID memory percent
+
+        std::vector<SnmpIfRow> m_interfaces { };              // ifTable rows from the last successful walk
+        std::uint32_t m_last_walk_steps { 0 };                // number of GETNEXTs the last walk took
 
     };
 
@@ -91,6 +109,11 @@ namespace NodeMonitor
         // poll one target with a single GetRequest carrying 4 varbinds: sysName, sysUpTime, enterprise cpu,
         // enterprise memory. updates state in-place and returns true on a parseable Response
         bool poll_target(SnmpTargetState& state);
+
+        // walk one subtree via successive GETNEXT requests. stops at endOfMibView, on the first OID that
+        // leaves the subtree, or after max_steps. used to enumerate ifTable rows. on success, fills out_vbs
+        // with every (OID, value) pair returned during the walk; returns true if at least one row came back
+        bool walk_subtree(SnmpTargetState& state, const AsnBer::Oid& root_oid, std::vector<SnmpVarbind>& out_vbs, int max_steps);
 
         std::shared_ptr<MetricCache> m_cache { };                              // existing metric path
         std::shared_ptr<MetricStore> m_store { };                              // optional postgres sink

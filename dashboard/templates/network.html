@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}network · node-monitor{% endblock %}
+
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">dhcp bound</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(dhcp_bound) }}</div>
+                <div class="text-secondary small">devices that completed DORA</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">in dns</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(in_dns) }}</div>
+                <div class="text-secondary small">zone {{ zone_suffix or "(unset)" }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">snmp responding</div>
+                <div class="display-6 fw-bold">{{ "{:,}".format(snmp_responding) }}</div>
+                <div class="text-secondary small">at least one successful poll</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card kpi-card">
+            <div class="card-body">
+                <div class="text-uppercase small text-secondary">full chain</div>
+                <div class="display-6 fw-bold text-success">{{ "{:,}".format(complete_chain) }}</div>
+                <div class="text-secondary small">DHCP + DNS + SNMP all green</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-7">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">bootstrap funnel <span class="text-secondary small">(DHCP → DNS → SNMP)</span></div>
+            <div class="card-body">
+                <canvas id="funnel-chart" height="160"></canvas>
+                <div class="small text-secondary mt-2">
+                    each bar shows how many devices reached that stage. drop-offs mean the next protocol hasn't taken effect for those devices yet.
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-5">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">protocol counters</div>
+            <div class="card-body">
+                <div class="row text-center small">
+                    <div class="col-4">
+                        <div class="text-uppercase text-secondary">dhcp acks</div>
+                        <div class="fs-5 fw-bold">{{ "{:,}".format(dhcp_totals.acks or 0) }}</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="text-uppercase text-secondary">dns queries</div>
+                        <div class="fs-5 fw-bold">{{ "{:,}".format(dns_totals.queries or 0) }}</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="text-uppercase text-secondary">snmp polls</div>
+                        <div class="fs-5 fw-bold">{{ "{:,}".format(snmp_totals.polls or 0) }}</div>
+                    </div>
+                </div>
+                <hr class="my-3">
+                <div class="row text-center small">
+                    <div class="col-4">
+                        <div class="text-uppercase text-secondary">pool free</div>
+                        <div class="fs-5 fw-bold">{{ "{:,}".format(dhcp_totals.pool_free or 0) }}</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="text-uppercase text-secondary">dns noerror</div>
+                        <div class="fs-5 fw-bold">{{ "{:,}".format(dns_totals.noerror or 0) }}</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="text-uppercase text-secondary">snmp ok</div>
+                        <div class="fs-5 fw-bold">{{ "{:,}".format(snmp_totals.successes or 0) }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">per-device chain status</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr>
+                        <th>hostname</th>
+                        <th>mac</th>
+                        <th>ip</th>
+                        <th>dhcp</th>
+                        <th>dns</th>
+                        <th>snmp</th>
+                        <th class="text-end">snmp cpu</th>
+                        <th class="text-end">snmp mem</th>
+                        <th class="text-end">uptime</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for d in devices %}
+                        <tr>
+                            <td>{{ d.hostname }}</td>
+                            <td class="text-secondary small"><code>{{ d.mac }}</code></td>
+                            <td><code>{{ d.ip }}</code></td>
+                            <td>
+                                {% if d.dhcp_state == 'bound' %}<span class="badge bg-success">bound</span>
+                                {% elif d.dhcp_state == 'offered' %}<span class="badge bg-info text-dark">offered</span>
+                                {% elif d.dhcp_state == 'expired' %}<span class="badge bg-warning text-dark">expired</span>
+                                {% elif d.dhcp_state == 'released' %}<span class="badge bg-secondary">released</span>
+                                {% else %}<span class="text-secondary">—</span>{% endif %}
+                            </td>
+                            <td>
+                                {% if d.in_dns %}<span class="badge bg-success">in zone</span>
+                                {% else %}<span class="text-secondary small">—</span>{% endif %}
+                            </td>
+                            <td>
+                                {% if d.snmp_status == 'responding' %}<span class="badge bg-success">responding</span>
+                                {% elif d.snmp_status == 'timeout' %}<span class="badge bg-warning text-dark">timeout</span>
+                                {% elif d.snmp_status == 'error' %}<span class="badge bg-danger">error</span>
+                                {% else %}<span class="text-secondary small">—</span>{% endif %}
+                            </td>
+                            <td class="text-end">{{ d.snmp_cpu if d.snmp_cpu is not none else "—" }}</td>
+                            <td class="text-end">{{ d.snmp_mem if d.snmp_mem is not none else "—" }}</td>
+                            <td class="text-end text-secondary small">{{ "{:,}s".format(d.snmp_uptime_s) if d.snmp_uptime_s is not none else "—" }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="9" class="text-secondary text-center py-3">no devices joined yet — has DHCP started?</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const funnel = {{ funnel_json | safe }};
+        const ctx = document.getElementById("funnel-chart").getContext("2d");
+        new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: funnel.map(f => f.label),
+                datasets: [{
+                    label: "devices",
+                    data: funnel.map(f => f.count),
+                    backgroundColor: ["#0d6efd", "#0dcaf0", "#198754"],
+                }],
+            },
+            options: {
+                indexAxis: "y",
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true } },
+            },
+        });
+    })();
+</script>
+{% endblock %}

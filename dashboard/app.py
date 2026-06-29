@@ -380,12 +380,108 @@ def actions() -> str:
     return render_template("actions.html", actions=rows, by_status=by_status, by_runbook=by_runbook)
 
 
+@app.route("/network")
+def network() -> str:
+
+    # pull all three protocol snapshots in one shot; each fetcher returns a stable empty payload when the
+    # collector is unreachable so the page renders cleanly during cold start
+    dhcp = fetch_dhcp_snapshot()
+    dns = fetch_dns_snapshot()
+    snmp = fetch_snmp_snapshot()
+
+    # join across the three by hostname. seeded from dhcp leases (which is the source of truth for "device
+    # joined the network"); each device picks up an in_dns flag and snmp status as it walks through the chain
+    by_host: dict = {}
+    for lease in dhcp.get("leases", []):
+        h = lease.get("hostname", "")
+        if not h: continue
+        by_host[h] = {
+            "hostname": h,
+            "mac": lease.get("mac", ""),
+            "ip": lease.get("ip", ""),
+            "dhcp_state": lease.get("state", ""),
+            "in_dns": False,
+            "snmp_status": "—",
+            "snmp_cpu": None,
+            "snmp_mem": None,
+            "snmp_uptime_s": None,
+        }
+
+    zone_suffix = dns.get("zone", "")
+    for entry in dns.get("entries", []):
+        fqdn = entry.get("fqdn", "")
+        if not fqdn: continue
+        suffix_match = f".{zone_suffix}"
+        short = fqdn[:-len(suffix_match)] if zone_suffix and fqdn.endswith(suffix_match) else fqdn
+        if short in by_host:
+            by_host[short]["in_dns"] = True
+
+    # snmp agents are matched by sysName (which the agent installs to the simulator's hostname)
+    for agent in snmp.get("agents", []):
+        sys_name = agent.get("sys_name", "")
+        if sys_name in by_host:
+            successes = int(agent.get("successes", 0))
+            timeouts = int(agent.get("timeouts", 0))
+            errors = int(agent.get("errors", 0))
+            if successes > 0:
+                by_host[sys_name]["snmp_status"] = "responding"
+            elif timeouts > 0:
+                by_host[sys_name]["snmp_status"] = "timeout"
+            elif errors > 0:
+                by_host[sys_name]["snmp_status"] = "error"
+            else:
+                by_host[sys_name]["snmp_status"] = "—"
+            by_host[sys_name]["snmp_cpu"] = agent.get("cpu")
+            by_host[sys_name]["snmp_mem"] = agent.get("memory")
+            ticks = int(agent.get("uptime_ticks", 0))
+            by_host[sys_name]["snmp_uptime_s"] = ticks // 100
+
+    devices = sorted(by_host.values(), key=lambda d: d["hostname"])
+
+    dhcp_bound = sum(1 for d in devices if d["dhcp_state"] == "bound")
+    in_dns_count = sum(1 for d in devices if d["in_dns"])
+    snmp_responding = sum(1 for d in devices if d["snmp_status"] == "responding")
+    complete_chain = sum(1 for d in devices if d["dhcp_state"] == "bound" and d["in_dns"] and d["snmp_status"] == "responding")
+
+    funnel_json = json.dumps([
+        {"label": "DHCP bound", "count": dhcp_bound},
+        {"label": "DNS resolvable", "count": in_dns_count},
+        {"label": "SNMP responding", "count": snmp_responding},
+    ])
+
+    return render_template(
+        "network.html",
+        devices=devices,
+        dhcp_bound=dhcp_bound,
+        in_dns=in_dns_count,
+        snmp_responding=snmp_responding,
+        complete_chain=complete_chain,
+        funnel_json=funnel_json,
+        dhcp_totals=dhcp.get("totals", {}),
+        dns_totals=dns.get("totals", {}),
+        snmp_totals=snmp.get("totals", {}),
+        zone_suffix=zone_suffix,
+    )
+
+
+def fetch_snmp_traps() -> dict:
+
+    try:
+        with urlopen(f"{COLLECTOR_URL}/snmp/traps", timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (URLError, OSError, ValueError):
+        return {"totals": {"received": 0, "dropped": 0}, "traps": []}
+
+
 @app.route("/snmp")
 def snmp() -> str:
 
     snapshot = fetch_snmp_snapshot()
+    traps_snapshot = fetch_snmp_traps()
     totals = snapshot.get("totals", {})
     agents = sorted(snapshot.get("agents", []), key=lambda a: a.get("host", ""))
+    traps = traps_snapshot.get("traps", [])[:50]
+    traps_totals = traps_snapshot.get("totals", {})
 
     polls = int(totals.get("polls", 0))
     successes = int(totals.get("successes", 0))
@@ -406,7 +502,15 @@ def snmp() -> str:
         errors=errors,
         success_rate=success_rate,
         mix_json=mix_json,
+        traps=traps,
+        traps_totals=traps_totals,
     )
+
+
+@app.route("/api/snmp/traps")
+def api_snmp_traps() -> Response:
+
+    return jsonify(fetch_snmp_traps())
 
 
 @app.route("/dns")

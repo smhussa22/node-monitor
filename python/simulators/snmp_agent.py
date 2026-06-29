@@ -497,3 +497,79 @@ def install_baseline(mib: MibTree, hostname: str, vendor: str, descr: str, boot_
     mib.set(f"{ENTERPRISE_BASE}.1.0", TAG_OCTET_STRING, lambda: vendor)                # vendor tag
     mib.set(f"{ENTERPRISE_BASE}.2.0", TAG_GAUGE32,      lambda: max(0, min(100, int(get_cpu()))))
     mib.set(f"{ENTERPRISE_BASE}.3.0", TAG_GAUGE32,      lambda: max(0, min(100, int(get_mem()))))
+
+
+# the SNMPv2-Trap PDU tag (context-specific constructed)
+TAG_TRAP_V2 = 0xA7
+
+# encode a SNMPv2-Trap message and unicast it to (host, port). per RFC 3416 4.2.6 a v2 trap PDU has
+# the same shape as a Response and its first two varbinds are required: sysUpTime.0 and snmpTrapOID.0.
+# event_oid is the OID identifying *what kind of event* this trap reports; extra_vbs adds context-specific
+# varbinds in the (oid, type_tag, value) tuple shape
+def send_trap(host: str, port: int, community: str, sys_uptime_ticks: int, event_oid: str, extra_vbs: list) -> bool:
+
+    import random as _r
+
+    # SNMPv2 mandates these two varbinds at the head of every notification PDU
+    sys_uptime_oid = (1, 3, 6, 1, 2, 1, 1, 3, 0)
+    snmp_trap_oid  = (1, 3, 6, 1, 6, 3, 1, 1, 4, 1, 0)
+
+    head_vb1 = enc_sequence(enc_oid(sys_uptime_oid) + enc_time_ticks(int(sys_uptime_ticks)))
+    head_vb2 = enc_sequence(enc_oid(snmp_trap_oid) + enc_oid(oid_str_to_tuple(event_oid)))
+
+    extras = b""
+    for oid_str, tag, value in extra_vbs:
+        oid_tuple = oid_str_to_tuple(oid_str)
+        name = enc_oid(oid_tuple)
+        if tag == TAG_OCTET_STRING:
+            val = enc_octet_string(str(value))
+        elif tag == TAG_INTEGER:
+            val = enc_integer(int(value))
+        elif tag == TAG_GAUGE32:
+            val = enc_gauge32(int(value))
+        elif tag == TAG_COUNTER32:
+            val = enc_counter32(int(value))
+        elif tag == TAG_TIME_TICKS:
+            val = enc_time_ticks(int(value))
+        else:
+            val = enc_null()
+        extras += enc_sequence(name + val)
+
+    vbs_seq = enc_sequence(head_vb1 + head_vb2 + extras)
+    pdu_body = enc_integer(_r.getrandbits(31)) + enc_integer(0) + enc_integer(0) + vbs_seq
+    pdu = _enc_tlv(TAG_TRAP_V2, pdu_body)
+    msg = enc_sequence(enc_integer(1) + enc_octet_string(community) + pdu)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(msg, (host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+# install a minimal IF-MIB subset so the poller can demonstrate a real GETNEXT-driven table walk.
+# columns implemented per RFC 2863: ifIndex (1), ifDescr (2), ifAdminStatus (7), ifOperStatus (8),
+# ifInOctets (10), ifOutOctets (16). counters tick monotonically based on a per-interface baseline
+def install_iftable(mib: MibTree, n_interfaces: int = 3) -> None:
+
+    import random
+
+    mib.set("1.3.6.1.2.1.2.1.0", TAG_INTEGER, lambda: n_interfaces)  # ifNumber.0
+
+    # interface counters; simulated as a steady byte rate per interface so two consecutive walks see growth
+    base_t = time.time()
+    rates = [random.uniform(1_000_000, 50_000_000) for _ in range(n_interfaces)]  # bytes per second
+
+    for i in range(1, n_interfaces + 1):
+        idx = i
+        descr = f"GigabitEthernet0/{i - 1}"
+        rate = rates[i - 1]
+        mib.set(f"1.3.6.1.2.1.2.2.1.1.{idx}",  TAG_INTEGER,      lambda x=idx: x)                                       # ifIndex
+        mib.set(f"1.3.6.1.2.1.2.2.1.2.{idx}",  TAG_OCTET_STRING, lambda d=descr: d)                                     # ifDescr
+        mib.set(f"1.3.6.1.2.1.2.2.1.7.{idx}",  TAG_INTEGER,      lambda: 1)                                              # ifAdminStatus (1=up)
+        mib.set(f"1.3.6.1.2.1.2.2.1.8.{idx}",  TAG_INTEGER,      lambda: 1 if random.random() > 0.05 else 2)             # ifOperStatus (occasional flap)
+        mib.set(f"1.3.6.1.2.1.2.2.1.10.{idx}", TAG_COUNTER32,    lambda r=rate: int(r * (time.time() - base_t)) & 0xFFFFFFFF)   # ifInOctets
+        mib.set(f"1.3.6.1.2.1.2.2.1.16.{idx}", TAG_COUNTER32,    lambda r=rate: int(r * 0.85 * (time.time() - base_t)) & 0xFFFFFFFF) # ifOutOctets

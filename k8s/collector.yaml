@@ -26,6 +26,10 @@ spec:
       port: 53
       targetPort: 53
       protocol: UDP
+    - name: snmp-trap
+      port: 162
+      targetPort: 162
+      protocol: UDP
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -66,6 +70,9 @@ spec:
               protocol: UDP
             - name: dns
               containerPort: 53
+              protocol: UDP
+            - name: snmp-trap
+              containerPort: 162
               protocol: UDP
           # placeholders so a future Phase 3 MetricStore can pick the dsn up; safe to ignore for now
           env:

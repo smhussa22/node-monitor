@@ -13,7 +13,9 @@ from simulators.dhcp_client import DhcpClient
 from simulators.dns_client import DnsClient
 from simulators.juniper_srx import JuniperSRXSimulator
 from simulators.paloalto import PaloAltoSimulator
-from simulators.snmp_agent import SnmpAgent, MibTree, install_baseline
+import threading
+
+from simulators.snmp_agent import SnmpAgent, MibTree, install_baseline, install_iftable, send_trap, TAG_OCTET_STRING, TAG_INTEGER
 
 
 # spin up a configurable number of simulators that push metrics to the c++ collector
@@ -35,6 +37,8 @@ def main() -> None:
     parser.add_argument("--dns-zone", type=str, default=os.environ.get("DNS_ZONE", "node-monitor.local"), help="zone suffix used for DNS lookups")
     parser.add_argument("--snmp-port", type=int, default=int(os.environ.get("SNMP_PORT", "161")), help="udp port the per-process snmp agent binds; set to 0 to disable")
     parser.add_argument("--snmp-community", type=str, default=os.environ.get("SNMP_COMMUNITY", "public"), help="community string the snmp agent accepts")
+    parser.add_argument("--snmp-trap-target", type=str, default=os.environ.get("SNMP_TRAP_TARGET", ""), help="host[:port] receiver for outbound SNMPv2 traps; when set, the simulator emits a periodic trap")
+    parser.add_argument("--snmp-trap-interval", type=int, default=int(os.environ.get("SNMP_TRAP_INTERVAL", "60")), help="seconds between trap emissions when --snmp-trap-target is set")
     args = parser.parse_args()
 
     # build the DNS client once and reuse it across simulators; resolve_a / resolve_ptr are stateless
@@ -103,10 +107,44 @@ def main() -> None:
             get_cpu=lambda: random.uniform(20.0, 85.0),
             get_mem=lambda: random.uniform(35.0, 75.0),
         )
+        # ifTable subset so the c++ poller can demonstrate a real GETNEXT-driven walk
+        install_iftable(mib, n_interfaces=3)
         snmp_agent = SnmpAgent(mib=mib, port=args.snmp_port, community=args.snmp_community)
         snmp_agent.start()
         if snmp_agent.running:
             print(f"[snmp] agent listening udp:{args.snmp_port} community={args.snmp_community} representing {getattr(primary, 'hostname', '?')}")
+
+    # outbound trap emitter: a background thread that periodically sends a v2 trap to the configured
+    # target. simulates "interface up/down" events so the collector's trap receiver has something to log
+    trap_thread_stop = threading.Event()
+
+    def trap_loop() -> None:
+        target_host = args.snmp_trap_target.split(":")[0]
+        target_port = int(args.snmp_trap_target.split(":")[1]) if ":" in args.snmp_trap_target else 162
+        primary_name = getattr(sims[0], "hostname", "snmp-host") if sims else "snmp-host"
+        ENTERPRISE = "1.3.6.1.4.1.99999"
+        boot = time.time()
+        while not trap_thread_stop.is_set():
+            trap_thread_stop.wait(args.snmp_trap_interval)
+            if trap_thread_stop.is_set(): break
+            # alternate between linkDown and linkUp; ifIndex picked randomly from 1..3
+            up = random.random() > 0.5
+            event_oid = "1.3.6.1.6.3.1.1.5.4" if up else "1.3.6.1.6.3.1.1.5.3"  # standard linkUp / linkDown
+            if_index = random.randint(1, 3)
+            uptime_ticks = int((time.time() - boot) * 100)
+            extras = [
+                (f"1.3.6.1.2.1.2.2.1.1.{if_index}", TAG_INTEGER, if_index),
+                (f"1.3.6.1.2.1.2.2.1.8.{if_index}", TAG_INTEGER, 1 if up else 2),
+                (f"{ENTERPRISE}.99.0",              TAG_OCTET_STRING, primary_name),
+            ]
+            ok = send_trap(host=target_host, port=target_port, community=args.snmp_community, sys_uptime_ticks=uptime_ticks, event_oid=event_oid, extra_vbs=extras)
+            if ok:
+                print(f"[snmp] sent {'linkUp' if up else 'linkDown'} trap for ifIndex={if_index} -> {target_host}:{target_port}")
+
+    trap_thread: Optional[threading.Thread] = None
+    if args.snmp_trap_target and sims:
+        trap_thread = threading.Thread(target=trap_loop, daemon=True)
+        trap_thread.start()
 
     # install a SIGINT handler so Ctrl+C and k8s SIGTERM stop every simulator cleanly. RELEASE any dhcp
     # leases on the way out so the server can reclaim ips immediately instead of waiting for expiry
@@ -114,6 +152,7 @@ def main() -> None:
         print(f"\nstopping {len(sims)} simulators...")
         for s in sims:
             s.stop()
+        trap_thread_stop.set()
         if snmp_agent is not None:
             snmp_agent.stop()
         for c in dhcp_clients:

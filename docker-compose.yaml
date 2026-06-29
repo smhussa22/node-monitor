@@ -66,6 +66,8 @@ services:
     environment:
       DHCP_SERVER: "collector"
       DNS_SERVER: "collector"
+      SNMP_TRAP_TARGET: "collector:162"
+      SNMP_TRAP_INTERVAL: "30"
     command:
       - "--vendor=cisco"
       - "--count=20"
@@ -83,6 +85,8 @@ services:
     environment:
       DHCP_SERVER: "collector"
       DNS_SERVER: "collector"
+      SNMP_TRAP_TARGET: "collector:162"
+      SNMP_TRAP_INTERVAL: "30"
     command:
       - "--vendor=juniper"
       - "--count=10"
@@ -98,6 +102,8 @@ services:
     environment:
       DHCP_SERVER: "collector"
       DNS_SERVER: "collector"
+      SNMP_TRAP_TARGET: "collector:162"
+      SNMP_TRAP_INTERVAL: "30"
     command:
       - "--vendor=paloalto"
       - "--count=10"

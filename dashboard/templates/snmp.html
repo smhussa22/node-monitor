@@ -104,6 +104,38 @@
     </div>
 </div>
 
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+                <span>recent traps <span class="text-secondary small">(SNMPv2 notifications received on udp/162)</span></span>
+                <span class="text-secondary small">received {{ "{:,}".format(traps_totals.received or 0) }} · dropped {{ "{:,}".format(traps_totals.dropped or 0) }}</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>source ip</th><th>event OID</th><th>kind</th><th>extras</th></tr></thead>
+                    <tbody>
+                    {% for t in traps %}
+                        <tr>
+                            <td><code>{{ t.source_ip }}</code></td>
+                            <td class="text-secondary small"><code>{{ t.event_oid }}</code></td>
+                            <td>
+                                {% if t.event_oid == '1.3.6.1.6.3.1.1.5.3' %}<span class="badge bg-danger">linkDown</span>
+                                {% elif t.event_oid == '1.3.6.1.6.3.1.1.5.4' %}<span class="badge bg-success">linkUp</span>
+                                {% else %}<span class="badge bg-secondary">other</span>{% endif %}
+                            </td>
+                            <td class="small">{{ t.extras }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="4" class="text-secondary text-center py-3">no traps received yet</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}

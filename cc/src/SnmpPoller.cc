@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 // cpp stdlib headers
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -18,6 +19,7 @@
 #include <mutex>
 #include <print>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -40,6 +42,9 @@ namespace NodeMonitor
         const AsnBer::Oid k_oid_sys_uptime { 1u, 3u, 6u, 1u, 2u, 1u, 1u, 3u, 0u };
         const AsnBer::Oid k_oid_cpu     { 1u, 3u, 6u, 1u, 4u, 1u, 99999u, 2u, 0u };
         const AsnBer::Oid k_oid_memory  { 1u, 3u, 6u, 1u, 4u, 1u, 99999u, 3u, 0u };
+
+        // IF-MIB column root used by the walk to enumerate per-interface rows
+        const AsnBer::Oid k_oid_iftable { 1u, 3u, 6u, 1u, 2u, 1u, 2u, 2u };
 
         // resolve `host` to a sockaddr_in; supports both dotted-quad and hostname inputs via getaddrinfo
         bool resolve_host(const std::string& host, std::uint16_t port, ::sockaddr_in& out)
@@ -303,6 +308,49 @@ namespace NodeMonitor
         state.m_last_latency_ms = static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count());
         ++state.m_successes;
 
+        // walk the ifTable subtree to enumerate interfaces. failures here don't fail the whole poll;
+        // many devices won't have an iftable or the walk may time out partway. group walk varbinds
+        // into rows keyed by the final OID arc (which is the ifIndex value)
+        std::vector<SnmpVarbind> walk_vbs { };
+        if (walk_subtree(state, k_oid_iftable, walk_vbs, 64))
+        {
+            std::unordered_map<std::uint32_t, SnmpIfRow> rows { };
+            for (const auto& vb : walk_vbs)
+            {
+                if (vb.m_oid.size() < 2uz) continue;
+                std::uint32_t index { vb.m_oid.back() };
+                std::uint32_t column { vb.m_oid[vb.m_oid.size() - 2uz] };
+                auto& row { rows[index] };
+                row.m_index = index;
+
+                switch (column)
+                {
+                    case 2u: // ifDescr
+                        if (std::holds_alternative<std::string>(vb.m_value)) row.m_descr = std::get<std::string>(vb.m_value);
+                        break;
+                    case 7u: // ifAdminStatus
+                        if (std::holds_alternative<std::int64_t>(vb.m_value)) row.m_admin_status = static_cast<std::uint32_t>(std::get<std::int64_t>(vb.m_value));
+                        break;
+                    case 8u: // ifOperStatus
+                        if (std::holds_alternative<std::int64_t>(vb.m_value)) row.m_oper_status = static_cast<std::uint32_t>(std::get<std::int64_t>(vb.m_value));
+                        break;
+                    case 10u: // ifInOctets (Counter32)
+                        if (std::holds_alternative<std::uint32_t>(vb.m_value)) row.m_in_octets = std::get<std::uint32_t>(vb.m_value);
+                        break;
+                    case 16u: // ifOutOctets (Counter32)
+                        if (std::holds_alternative<std::uint32_t>(vb.m_value)) row.m_out_octets = std::get<std::uint32_t>(vb.m_value);
+                        break;
+                    default: break;
+                }
+            }
+
+            state.m_interfaces.clear();
+            state.m_interfaces.reserve(rows.size());
+            for (auto& [_, row] : rows) state.m_interfaces.push_back(std::move(row));
+            // sort by ifIndex so the dashboard renders them in order
+            std::sort(state.m_interfaces.begin(), state.m_interfaces.end(), [](const SnmpIfRow& a, const SnmpIfRow& b) { return a.m_index < b.m_index; });
+        }
+
         // feed the existing telemetry pipeline so dashboards and alert rules see the snmp-sourced values
         // without caring how they were obtained. the payload also gets the raw uptime ticks for visibility
         if (!state.m_last_sys_name.empty() && m_cache)
@@ -323,6 +371,74 @@ namespace NodeMonitor
         }
 
         return true;
+
+    }
+
+    bool SnmpPoller::walk_subtree(SnmpTargetState& state, const AsnBer::Oid& root_oid, std::vector<SnmpVarbind>& out_vbs, int max_steps)
+    {
+
+        ::sockaddr_in dest { };
+        if (!resolve_host(state.m_host, state.m_port, dest)) return false;
+
+        AsnBer::Oid current { root_oid };
+        int steps { 0 };
+        bool any_returned { false };
+
+        while (steps < max_steps)
+        {
+
+            // build GETNEXT(current) — one varbind with NULL value
+            SnmpMessage msg { };
+            msg.m_version = 1;
+            msg.m_community = state.m_community;
+            msg.m_pdu.m_pdu_tag = AsnBer::k_tag_get_next_request;
+            static std::atomic<std::int32_t> s_next_rid { 100000 };
+            msg.m_pdu.m_request_id = s_next_rid.fetch_add(1, std::memory_order_relaxed);
+            SnmpVarbind vb_in { };
+            vb_in.m_oid = current;
+            vb_in.m_value_tag = AsnBer::k_tag_null;
+            msg.m_pdu.m_varbinds.push_back(std::move(vb_in));
+
+            auto encoded { encode_snmp(msg) };
+
+            int fd { ::socket(AF_INET, SOCK_DGRAM, 0) };
+            if (fd < 0) return any_returned;
+            ::timeval tv { };
+            tv.tv_sec = static_cast<long>(m_per_target_timeout.count() / 1000);
+            tv.tv_usec = static_cast<long>((m_per_target_timeout.count() % 1000) * 1000);
+            ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+            if (::sendto(fd, encoded.data(), encoded.size(), 0, reinterpret_cast<::sockaddr*>(&dest), sizeof(dest)) < 0)
+            {
+                ::close(fd);
+                return any_returned;
+            }
+
+            std::uint8_t buffer[4096] { };
+            ::ssize_t n { ::recvfrom(fd, buffer, sizeof(buffer), 0, nullptr, nullptr) };
+            ::close(fd);
+
+            if (n <= 0) return any_returned;
+
+            auto decoded { decode_snmp(buffer, static_cast<std::size_t>(n)) };
+            if (!decoded.has_value() || decoded->m_pdu.m_request_id != msg.m_pdu.m_request_id) return any_returned;
+            if (decoded->m_pdu.m_varbinds.empty()) return any_returned;
+
+            const auto& vb_out { decoded->m_pdu.m_varbinds.front() };
+
+            // walk terminator: endOfMibView marker, OR the returned OID has left the subtree we asked for
+            if (vb_out.m_value_tag == AsnBer::k_tag_end_of_mib_view) break;
+            if (!AsnBer::is_descendant(vb_out.m_oid, root_oid) && AsnBer::compare_oids(vb_out.m_oid, root_oid) != 0) break;
+
+            out_vbs.push_back(vb_out);
+            any_returned = true;
+            current = vb_out.m_oid;
+            ++steps;
+
+        }
+
+        state.m_last_walk_steps = static_cast<std::uint32_t>(steps);
+        return any_returned;
 
     }
 

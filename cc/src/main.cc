@@ -33,6 +33,7 @@
 #include "DnsServer.hh"
 #include "DnsZone.hh"
 #include "SnmpPoller.hh"
+#include "SnmpTrapReceiver.hh"
 #include "K8sClient.hh"
 #include "MetricCache.hh"
 #include "MetricStore.hh"
@@ -125,6 +126,16 @@ int main()
     // snmp poller: seeds its target list from SNMP_TARGETS (comma-separated host[:port] entries). when
     // unset the poller still runs but does nothing — wired this way so local dev without simulator agents
     // doesn't waste resources. community is read once from SNMP_COMMUNITY; defaults to "public" per v2c
+    // snmp trap receiver on udp/162; agents may emit notification PDUs when simulated events fire.
+    // SNMP_TRAP_PORT env overrides the default for local dev without privileged ports
+    std::uint16_t trap_port { 162 };
+    if (const char* tp { std::getenv("SNMP_TRAP_PORT") }; tp != nullptr)
+    {
+        try { trap_port = static_cast<std::uint16_t>(std::stoi(tp)); }
+        catch (...) { /* keep default */ }
+    }
+    auto snmp_traps { std::make_shared<nm::SnmpTrapReceiver>(trap_port, 500uz) };
+
     auto snmp { std::make_shared<nm::SnmpPoller>(cache, store, std::chrono::seconds { 30 }, std::chrono::milliseconds { 2000 }) };
     {
         std::string community { "public" };
@@ -157,10 +168,10 @@ int main()
         }
     }
 
-    // construct the collector server bound to a default port; acl + dhcp + dns + snmp are shared so
-    // /acl/rules, /dhcp/leases, /dns/zone, /snmp/agents all return live state from the same engines
-    // that handle real traffic
-    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl, dhcp, dns, dns_zone, snmp };
+    // construct the collector server bound to a default port; acl + dhcp + dns + snmp + snmp_traps are
+    // shared so the /acl/rules, /dhcp/leases, /dns/zone, /snmp/agents, /snmp/traps endpoints all return
+    // live state from the same engines that handle real traffic
+    nm::CollectorServer server { cache, store, pool, std::uint16_t { 8000 }, acl, dhcp, dns, dns_zone, snmp, snmp_traps };
 
     // construct the netflow receiver bound to the standard netflow v5/v9 port
     nm::NetflowReceiver netflow { std::uint16_t { 2055 }, store, acl };
@@ -270,11 +281,13 @@ int main()
     dhcp->start();
     dns->start();
     snmp->start();
+    snmp_traps->start();
     std::println("node-monitor collector running on port 8000");
     std::this_thread::sleep_for(std::chrono::hours { 1 });
 
     // graceful shutdown in reverse start order
     scheduler.stop();
+    snmp_traps->stop();
     snmp->stop();
     dns->stop();
     dhcp->stop();
