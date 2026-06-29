@@ -112,5 +112,59 @@ services:
       - "--collector=http://collector:8000"
       - "--hostname-prefix=papod"
 
+  # two real FRR routing daemons that peer with each other over eBGP. demonstrates the boundary the
+  # writeup commits to: we don't reimplement BGP / OSPF / EVPN — we observe a real implementation
+  # via the same SNMP poller that handles everything else. AS 65001 <-> AS 65002 over TCP/179.
+  # static IPs on a dedicated network so the configs can hardcode neighbor addresses
+  frr-router-1:
+    build:
+      context: k8s/frr
+    container_name: nm-frr1
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    environment:
+      FRR_HOSTNAME: "frr1"
+      COLLECTOR_URL: "http://collector:8000/"
+      BGP_SCRAPE_INTERVAL: "15"
+    volumes:
+      - ./k8s/frr/frr1.conf:/etc/frr/frr.conf:ro
+    networks:
+      frrnet:
+        ipv4_address: 172.20.0.10
+      default: {}
+
+  frr-router-2:
+    build:
+      context: k8s/frr
+    container_name: nm-frr2
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    environment:
+      FRR_HOSTNAME: "frr2"
+      COLLECTOR_URL: "http://collector:8000/"
+      BGP_SCRAPE_INTERVAL: "15"
+    volumes:
+      - ./k8s/frr/frr2.conf:/etc/frr/frr.conf:ro
+    networks:
+      frrnet:
+        ipv4_address: 172.20.0.11
+      default: {}
+
 volumes:
   pg-data:
+
+networks:
+  default:
+    name: node-monitor_default
+  # private subnet that frr-router-1 and frr-router-2 share for the eBGP peering. neighbor addresses
+  # in frr1.conf / frr2.conf are 172.20.0.10 and 172.20.0.11 — pinned via the ipam config below
+  frrnet:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/24

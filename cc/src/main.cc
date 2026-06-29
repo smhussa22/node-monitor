@@ -251,6 +251,21 @@ int main()
         runbooks->register_runbook(std::move(book));
     }
 
+    // bgp_peer_down: a routing adjacency went away. log + notify + recycle the misbehaving FRR pod
+    // via the existing k8s api path. in docker-compose without in-cluster creds the restart drops
+    // through to dry_run, which is the correct fallback
+    {
+        nm::Runbook book { };
+        book.m_name = "rb_bgp_peer_down";
+        book.m_rule_name = "bgp_peer_down";
+        book.m_cooldown = 2min;
+        book.m_max_per_hour = 20;
+        book.m_actions.push_back(std::make_unique<nm::LogOnlyAction>("BGP adjacency on ${hostname} dropped; restarting FRR pod"));
+        book.m_actions.push_back(std::make_unique<nm::WebhookNotifyAction>(""));
+        book.m_actions.push_back(std::make_unique<nm::RestartPodAction>("default", "app=frr-router"));
+        runbooks->register_runbook(std::move(book));
+    }
+
     // construct the alert engine and register a vendor-aware rule set; rules referencing
     // payload fields use json pointer syntax so any nested telemetry field is reachable
     auto alerts { std::make_shared<nm::AlertEngine>(cache, store, runbooks) };
@@ -285,6 +300,11 @@ int main()
     // security signal: classic horizontal scan fingerprint — one src_ip hitting many distinct dst_ports
     // in a short window. queries the flows table which is already populated by NetflowReceiver
     alerts->register_rule(std::make_unique<nm::PortScanRule>("port_scan_detected", 50u, 60s, 0s, "warning"));
+
+    // routing-plane observation: the bgp_scraper sidecar on each FRR container POSTs a metric tagged
+    // vendor=frr-router with /peers_established equal to the number of BGP peers in state Established.
+    // when that drops below 1 (e.g. an FRR pod restarted, a config error, the peer left), fire critical
+    alerts->register_rule(std::make_unique<nm::ThresholdRule>("bgp_peer_down", "/peers_established", "<", 1.0, 30s, "critical", "frr-router"));
 
     // schedule a periodic snapshot of the cache and print one line per device
     scheduler.schedule([cache]
