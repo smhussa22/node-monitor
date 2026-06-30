@@ -16,7 +16,7 @@ docker compose up -d
 | `local_port_scan.sh` | Injects 60 binary NetFlow v5 packets from one src_ip → `port_scan_detected` fires |
 | `local_bgp_failure.sh` | Kills nm-frr2 → `bgp_peer_down` fires → restarts nm-frr2 → incident auto-resolves |
 | `local_harvest_numbers.sh` | Prints the headline numbers from the local postgres |
-| `local_capture_pcap.sh` | Tcpdumps DHCP/DNS/SNMP/NetFlow traffic to a fresh pcap for Wireshark |
+| `local_capture_pcap.sh [type] [seconds]` | Tcpdumps to `pcaps/<type>_<YYYY-MM-DD>_<HHMM>.pcap`. type ∈ {all, dhcp, dns, snmp, snmp-bulk, snmp-traps, netflow} |
 
 ## Third-party tool interop (docker-compose stack must be running)
 
@@ -43,6 +43,21 @@ docker compose up -d
 | `eks_harvest_numbers.sh` | Headline numbers from the EKS postgres pod |
 
 ---
+
+## Where pcaps live
+
+All packet captures go to `pcaps/` at the repo root. That directory is git-ignored — pcaps are
+useful as Wireshark evidence during the writeup but not source-of-truth, so they stay out of
+git. Names always carry the protocol type and a timestamp, e.g.:
+
+```
+pcaps/all-protocols_2026-06-29_0600.pcap
+pcaps/snmp-bulk_2026-06-29_0720.pcap
+pcaps/dhcp_2026-06-30_1442.pcap
+```
+
+So you can run `local_capture_pcap.sh` multiple times without overwriting prior captures, and
+each filename tells you what's inside without opening Wireshark.
 
 ## How the writeup uses these
 

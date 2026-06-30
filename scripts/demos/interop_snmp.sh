@@ -37,8 +37,8 @@ snmpwalk -v2c -c public -t 3 simulator-cisco 1.3.6.1.2.1.1 2>&1 | head -6
 echo ''
 echo '--- snmpbulkwalk: ifTable (uses GETBULK with max-repetitions) ---'
 echo '\$ snmpbulkwalk -v2c -c public simulator-cisco 1.3.6.1.2.1.2.2'
-snmpbulkwalk -v2c -c public -Cr 10 -t 3 simulator-cisco 1.3.6.1.2.1.2.2 2>&1 | head -10
+snmpbulkwalk -v2c -c public -t 3 simulator-cisco 1.3.6.1.2.1.2.2 2>&1 | head -10
 echo '(...)'
-n=\$(snmpbulkwalk -v2c -c public -Cr 10 -t 3 simulator-cisco 1.3.6.1.2.1.2.2 2>&1 | wc -l)
+n=\$(snmpbulkwalk -v2c -c public -t 3 simulator-cisco 1.3.6.1.2.1.2.2 2>&1 | wc -l)
 echo \"total OIDs returned: \$n\"
 "
