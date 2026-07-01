@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
+enable_testing()
 
 FetchContent_Declare(
     nlohmann_json
@@ -89,3 +90,30 @@ target_link_libraries(dhcp_bench_wire PRIVATE node_monitor_lib)
 # dns_bench_wire measures DNS query throughput over a real UDP socket on 127.0.0.1
 add_executable(dns_bench_wire EXCLUDE_FROM_ALL bench/dns_bench_wire.cc)
 target_link_libraries(dns_bench_wire PRIVATE node_monitor_lib)
+
+# ---- GoogleTest ----
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+set(TEST_SOURCES
+    tests/test_dhcp_packet.cc
+    tests/test_dhcp_pool.cc
+    tests/test_dns_packet.cc
+    tests/test_dns_zone.cc
+    tests/test_acl.cc
+    tests/test_asn_ber.cc
+    tests/test_netflow_v5.cc
+    tests/test_metric_cache.cc
+    tests/test_rules.cc
+)
+
+add_executable(node_monitor_tests ${TEST_SOURCES})
+target_link_libraries(node_monitor_tests PRIVATE node_monitor_lib GTest::gtest_main)
+include(GoogleTest)
+gtest_discover_tests(node_monitor_tests)
