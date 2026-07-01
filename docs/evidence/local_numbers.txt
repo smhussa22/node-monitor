@@ -1,0 +1,21 @@
+=== node-monitor numbers (local docker-compose) ===
+
+  metric rows                    : 29475
+  unique simulated devices       : 42
+  vendor breakdown               : cisco=20, frr-router=2, juniper=10, paloalto=10, snmp=3
+  total incidents fired          : 3933
+  active incidents               : 50
+  auto-resolved incidents        : 3883
+  incidents by rule              : cpu_spike=1661, memory_jump=1275, ips_storm=544, health_down=408, health_flapping=41
+  netflow records persisted      : 14320
+  flow permits / denies          : 2752 / 11568
+  runbook actions executed       : 1082
+  successful pod restarts        : 0
+  dry-run pod restarts (compose) : 30
+  rate-limit suppressions        : 611
+  cooldown suppressions          : 211
+  dhcp lease state changes       : 169
+  unique macs that bound a lease : 40
+
+These are the local-docker-compose numbers. Run scripts/demos/eks_harvest_numbers.sh
+after the EKS deploy to get the headline numbers for the writeup.

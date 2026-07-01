@@ -20,20 +20,20 @@ echo "=== node-monitor headline numbers (EKS run) ==="
 echo "Stack uptime: $(kubectl get deploy collector -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || echo unknown)"
 echo ""
 
-printf "  metric rows persisted          : %s\n"   "$(q 'SELECT COUNT(*) FROM metrics')"
-printf "  unique simulated devices       : %s\n"   "$(q 'SELECT COUNT(DISTINCT hostname) FROM metrics')"
-printf "  total incidents fired          : %s\n"   "$(q 'SELECT COUNT(*) FROM incidents')"
-printf "  active (unresolved) incidents  : %s\n"   "$(q 'SELECT COUNT(*) FROM incidents WHERE resolved_at IS NULL')"
-printf "  auto-resolved incidents        : %s\n"   "$(q 'SELECT COUNT(*) FROM incidents WHERE resolved_at IS NOT NULL')"
-printf "  NetFlow records (binary v5)    : %s\n"   "$(q 'SELECT COUNT(*) FROM flows')"
-printf "  acl-permitted flows            : %s\n"   "$(q \"SELECT COUNT(*) FROM flows WHERE acl_action='permit'\")"
-printf "  acl-denied flows               : %s\n"   "$(q \"SELECT COUNT(*) FROM flows WHERE acl_action='deny'\")"
-printf "  runbook actions executed       : %s\n"   "$(q 'SELECT COUNT(*) FROM actions')"
-printf "  SUCCESSFUL restart_pod calls   : %s\n"   "$(q \"SELECT COUNT(*) FROM actions WHERE action_type='restart_pod' AND status='success'\")"
-printf "  rate-limit suppressions        : %s\n"   "$(q \"SELECT COUNT(*) FROM actions WHERE status='rate_limited'\")"
-printf "  cooldown suppressions          : %s\n"   "$(q \"SELECT COUNT(*) FROM actions WHERE status='cooldown_suppressed'\")"
-printf "  dhcp lease state changes       : %s\n"   "$(q 'SELECT COUNT(*) FROM dhcp_leases')"
-printf "  unique macs that bound a lease : %s\n"   "$(q \"SELECT COUNT(DISTINCT mac) FROM dhcp_leases WHERE state='bound'\")"
+printf "  metric rows persisted          : %s\n"   "$(q "SELECT COUNT(*) FROM metrics")"
+printf "  unique simulated devices       : %s\n"   "$(q "SELECT COUNT(DISTINCT hostname) FROM metrics")"
+printf "  total incidents fired          : %s\n"   "$(q "SELECT COUNT(*) FROM incidents")"
+printf "  active (unresolved) incidents  : %s\n"   "$(q "SELECT COUNT(*) FROM incidents WHERE resolved_at IS NULL")"
+printf "  auto-resolved incidents        : %s\n"   "$(q "SELECT COUNT(*) FROM incidents WHERE resolved_at IS NOT NULL")"
+printf "  NetFlow records (binary v5)    : %s\n"   "$(q "SELECT COUNT(*) FROM flows")"
+printf "  acl-permitted flows            : %s\n"   "$(q "SELECT COUNT(*) FROM flows WHERE acl_action='permit'")"
+printf "  acl-denied flows               : %s\n"   "$(q "SELECT COUNT(*) FROM flows WHERE acl_action='deny'")"
+printf "  runbook actions executed       : %s\n"   "$(q "SELECT COUNT(*) FROM actions")"
+printf "  SUCCESSFUL restart_pod calls   : %s\n"   "$(q "SELECT COUNT(*) FROM actions WHERE action_type='restart_pod' AND status='success'")"
+printf "  rate-limit suppressions        : %s\n"   "$(q "SELECT COUNT(*) FROM actions WHERE status='rate_limited'")"
+printf "  cooldown suppressions          : %s\n"   "$(q "SELECT COUNT(*) FROM actions WHERE status='cooldown_suppressed'")"
+printf "  dhcp lease state changes       : %s\n"   "$(q "SELECT COUNT(*) FROM dhcp_leases")"
+printf "  unique macs that bound a lease : %s\n"   "$(q "SELECT COUNT(DISTINCT mac) FROM dhcp_leases WHERE state='bound'")"
 
 echo ""
 echo "Top 5 rules by incident count:"
@@ -46,9 +46,9 @@ q "SELECT runbook_name || ': ' || COUNT(*) FROM actions GROUP BY runbook_name OR
 echo ""
 echo "=== suggested writeup paragraph ==="
 echo ""
-metrics=$(q 'SELECT COUNT(*) FROM metrics')
-incidents=$(q 'SELECT COUNT(*) FROM incidents')
-flows=$(q 'SELECT COUNT(*) FROM flows')
+metrics=$(q "SELECT COUNT(*) FROM metrics")
+incidents=$(q "SELECT COUNT(*) FROM incidents")
+flows=$(q "SELECT COUNT(*) FROM flows")
 successful_restarts=$(q "SELECT COUNT(*) FROM actions WHERE action_type='restart_pod' AND status='success'")
 suppressions=$(q "SELECT COUNT(*) FROM actions WHERE status IN ('rate_limited','cooldown_suppressed')")
 echo "  \"Validated on AWS EKS with a fleet of ~1,200 simulated devices across 17 simulator pods plus"

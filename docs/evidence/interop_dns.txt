@@ -1,0 +1,21 @@
+=== DNS interop: dig (ISC BIND) → our DnsServer ===
+
+--- A record ---
+$ dig +short @collector A collector.node-monitor.local
+10.42.0.1
+
+--- AAAA record (IPv4-mapped IPv6 synthesized from the A binding per RFC 4291 § 2.5.5.2) ---
+$ dig +short @collector AAAA collector.node-monitor.local
+::ffff:10.42.0.1
+
+--- PTR (reverse lookup via the in-addr.arpa chain) ---
+$ dig +short @collector -x 10.42.0.1
+collector.node-monitor.local.
+
+--- NXDOMAIN (name does not exist in our zone) ---
+$ dig +short @collector A nonexistent.node-monitor.local
+(empty — correct: server returned NOERROR with 0 answers / NXDOMAIN)
+
+--- REFUSED (name is outside our authoritative zone) ---
+$ dig +short @collector A google.com
+(empty — correct: server returned REFUSED for off-zone query)

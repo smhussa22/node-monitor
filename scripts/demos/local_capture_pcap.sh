@@ -64,6 +64,8 @@ sleep 4
 # trigger representative traffic so the capture is non-empty even if the simulators are quiet at that
 # moment. each protocol gets a tailored kick — snmp-bulk explicitly triggers a GetBulkRequest, etc.
 echo "Generating activity to ensure the capture is non-empty..."
+
+# DNS / SNMP triggers run in an alpine sidecar with bind-tools + net-snmp-tools
 docker run --rm --network node-monitor_default alpine:latest sh -c "
 apk add --quiet net-snmp-tools bind-tools 2>/dev/null
 case '$TYPE' in
@@ -76,6 +78,40 @@ case '$TYPE' in
     all|snmp-bulk)   snmpbulkwalk -v2c -c public -t 2 simulator-cisco 1.3.6.1.2.1.2.2 >/dev/null 2>&1 ;;
 esac
 " >/dev/null 2>&1
+
+# DHCP DISCOVER trigger uses scapy — interop_dhcp.sh already proved this DISCOVER
+# format elicits an OFFER from our DhcpServer, so we reuse the same recipe to get a
+# full DORA exchange visible in the pcap (vs a hand-rolled DISCOVER which the collector
+# silently ignores).
+if [ "$TYPE" = "all" ] || [ "$TYPE" = "dhcp" ]; then
+    docker run --rm --network node-monitor_default python:3.12-slim sh -c "
+pip install --quiet --break-system-packages scapy >/dev/null 2>&1
+python3 -c '
+from scapy.all import BOOTP, DHCP
+import socket, random
+ip = socket.gethostbyname(\"collector\")
+xid = random.getrandbits(32)
+mac_bytes = bytes([0x02, 0xde, 0xad, 0xbe, 0xef, random.randint(1, 255)])
+discover = (
+    BOOTP(op=1, htype=1, hlen=6, xid=xid, chaddr=mac_bytes + b\"\\x00\"*10) /
+    DHCP(options=[
+        (\"message-type\", \"discover\"),
+        (\"hostname\", \"capture-trigger\"),
+        (\"param_req_list\", 1, 3, 6, 51, 54),
+        \"end\",
+    ])
+)
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind((\"0.0.0.0\", 0))
+s.settimeout(3)
+s.sendto(bytes(discover), (ip, 67))
+try:
+    s.recvfrom(4096)
+except Exception:
+    pass
+'
+" >/dev/null 2>&1 || true
+fi
 
 REMAINING=$((DURATION - 4))
 [ $REMAINING -gt 0 ] && sleep "$REMAINING"

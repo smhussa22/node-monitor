@@ -1,0 +1,26 @@
+=== DHCP interop: scapy BOOTP decoder → our DhcpServer ===
+
+Sending DISCOVER to collector (172.18.0.6)...
+DISCOVER size: 271 bytes
+Received 300 bytes back from server
+
+=== scapy decoded our OFFER as: ===
+###[ BOOTP ]###
+  op        = BOOTREPLY
+  htype     = Ethernet (10Mb)
+  hlen      = 6
+  hops      = 0
+  xid       = 0xe28cbe07
+  secs      = 0
+  flags     = 
+  ciaddr    = 0.0.0.0
+  yiaddr    = 10.42.0.42
+  siaddr    = 10.42.0.1
+  giaddr    = 0.0.0.0
+  chaddr    = 02:de:ad:be:ef:42 (+ 10 nul pad)
+  sname     = b''
+  file      = b''
+  options   = b'c\x82Sc' (DHCP magic)
+###[ DHCP options ]###
+     options   = [message-type=offer server_id=10.42.0.1 lease_time=3600 renewal_time=1800 rebinding_time=3150 subnet_mask=255.255.0.0 router=10.42.0.1 name_server=10.42.0.2 end pad pad pad pad pad pad pad pad pad pad pad pad pad pad]
+
