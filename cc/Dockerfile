@@ -12,6 +12,7 @@ COPY CMakeLists.txt ./
 COPY include/ ./include/
 COPY src/ ./src/
 COPY bench/ ./bench/
+COPY tests/ ./tests/
 
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build --target node_monitor -j
